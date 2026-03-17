@@ -186,6 +186,11 @@ def main():
 
     for i in range(args.max_iters):
         iteration = start_iter + i + 1
+        # Pull latest program.md (allows remote edits from MTOI dashboard)
+        try:
+            subprocess.run(["git", "pull", "--quiet"], capture_output=True, timeout=15)
+        except Exception:
+            pass  # non-fatal, continue with local version
         print(f"[iter {iteration}]", end=" ")
 
         if not args.dry_run:
