@@ -71,13 +71,19 @@ def run_backtest(timeout=60):
 
 
 def git_commit_improvement(old_score, new_score, iteration):
-    """Stage backtest.py and commit."""
-    subprocess.run(["git", "add", BACKTEST_SCRIPT], check=True,
+    """Stage backtest.py + state.json, commit, and push so MTOI dashboard stays live."""
+    subprocess.run(["git", "add", BACKTEST_SCRIPT, STATE_FILE], check=True,
                     capture_output=True)
     old_str = f"{old_score:.4f}" if old_score is not None and old_score != float("-inf") else "none"
     msg = f"improvement: score {old_str} -> {new_score:.4f} [iter {iteration}]"
     subprocess.run(["git", "commit", "-m", msg], check=True,
                     capture_output=True)
+    # Push to GitHub so MTOI dashboard can read live state
+    try:
+        subprocess.run(["git", "push"], check=True, capture_output=True, timeout=30)
+        print("  -> pushed to GitHub")
+    except Exception as e:
+        print(f"  -> push failed (non-fatal): {e}")
     return msg
 
 
