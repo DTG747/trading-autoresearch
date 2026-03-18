@@ -144,12 +144,12 @@ def run_strategy(df):
     adx_period = 14
     adx_threshold = 25     # minimum ADX to confirm trend (stricter)
     atr_sl_mult = 1.2      # stop loss = 1.2x ATR
-    atr_tp_mult = 3.5      # take profit = 3.5x ATR
+    atr_tp_mult = 4.0      # take profit = 4.0x ATR
     atr_trail_mult = 1.3   # trailing stop distance
     atr_trail_tight = 0.9  # tighter trail once trade is well in profit
     trail_tighten_threshold = 1.8  # tighten trail after price moves 1.8x ATR in favor
-    position_size = 283.0
-    max_hold_bars = 20      # max bars to hold a position
+    position_size = 290.0
+    max_hold_bars = 30      # max bars to hold a position
     breakeven_atr_mult = 1.0  # move stop to entry after price moves 1.0x ATR in favor
     vol_period = 20         # volume moving average period
     vol_mult = 0.8          # volume must be >= 0.8x average (filter only low-volume bars)
@@ -224,6 +224,7 @@ def run_strategy(df):
     stop_price = None
     tp_price = None
     best_price = None
+    current_size = position_size
     warmup = slow_ema + 5
 
     # Track RSI pullback state
@@ -293,7 +294,7 @@ def run_strategy(df):
                 trades.append({
                     "entry_idx": entry_idx, "exit_idx": i,
                     "entry_price": entry_price, "exit_price": close,
-                    "direction": "long", "size": position_size,
+                    "direction": "long", "size": current_size,
                 })
                 position = None
 
@@ -323,12 +324,17 @@ def run_strategy(df):
                 trades.append({
                     "entry_idx": entry_idx, "exit_idx": i,
                     "entry_price": entry_price, "exit_price": close,
-                    "direction": "short", "size": position_size,
+                    "direction": "short", "size": current_size,
                 })
                 position = None
 
         # Entry logic: RSI pullback within trend + volatility expansion
         if position is None:
+            # Dynamic position sizing: scale with ADX strength
+            # ADX 25 -> 0.7x size, ADX 40+ -> 1.0x size
+            adx_scale = min(1.0, 0.7 + 0.3 * (adx - adx_threshold) / 15.0) if adx > adx_threshold else 0.7
+            trade_size = position_size * adx_scale
+
             if uptrend and strong_trend and volume_confirmed and long_pullback_ready and rsi > rsi_recover_low and rsi < 70:
                 position = "long"
                 entry_price = close
@@ -337,6 +343,7 @@ def run_strategy(df):
                 tp_price = close + atr_tp_mult * atr
                 best_price = close
                 long_pullback_ready = False
+                current_size = trade_size
 
             elif downtrend and strong_trend and volume_confirmed and short_pullback_ready and rsi < rsi_recover_high and rsi > 30:
                 position = "short"
@@ -346,13 +353,14 @@ def run_strategy(df):
                 tp_price = close - atr_tp_mult * atr
                 best_price = close
                 short_pullback_ready = False
+                current_size = trade_size
 
     # Close open position at end
     if position is not None:
         trades.append({
             "entry_idx": entry_idx, "exit_idx": len(df) - 1,
             "entry_price": entry_price, "exit_price": df["close"].iloc[-1],
-            "direction": position, "size": position_size,
+            "direction": position, "size": current_size,
         })
 
     return trades
