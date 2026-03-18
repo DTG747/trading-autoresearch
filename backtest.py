@@ -25,6 +25,8 @@ def load_data(path="data/btc_4h.csv"):
     df = pd.read_csv(path)
     df["timestamp"] = pd.to_datetime(df["timestamp"])
     df = df.sort_values("timestamp").reset_index(drop=True)
+    # Remove zero/NaN volume candles (data quality gate)
+    df = df[df["volume"] > 0].reset_index(drop=True)
     return df
 
 
@@ -34,20 +36,27 @@ def load_data(path="data/btc_4h.csv"):
 
 def compute_metrics(trades, df):
     """
-    Compute composite_score = sharpe_ratio - 0.5 * max_drawdown_pct.
+    Compute composite_score = capped_sharpe - 0.5 * max_drawdown_pct.
 
     trades: list of dicts with keys:
         entry_idx, exit_idx, entry_price, exit_price, direction ('long'/'short'), size
+
+    Sharpe is CAPPED at 20.0 to prevent degenerate zero-variance solutions.
+    Minimum return and trade count gates are enforced in the main block.
     """
     if not trades:
-        return {"sharpe_ratio": 0.0, "max_drawdown_pct": 100.0, "composite_score": -50.0,
-                "total_return_pct": 0.0, "num_trades": 0, "win_rate": 0.0}
+        return {
+            "sharpe_ratio": 0.0, "max_drawdown_pct": 100.0, "composite_score": -50.0,
+            "total_return_pct": 0.0, "num_trades": 0, "win_rate": 0.0, "profit_factor": 0.0,
+        }
 
     # Build equity curve from trades
     initial_capital = 10000.0
     equity = initial_capital
     equity_curve = [initial_capital]
     returns = []
+    gross_profit = 0.0
+    gross_loss = 0.0
 
     for t in trades:
         if t["direction"] == "long":
@@ -56,19 +65,30 @@ def compute_metrics(trades, df):
             pnl = (t["entry_price"] - t["exit_price"]) / t["entry_price"] * t["size"]
         equity += pnl
         equity_curve.append(equity)
-        returns.append(pnl / (equity - pnl) if (equity - pnl) > 0 else 0.0)
+        ret = pnl / (equity - pnl) if (equity - pnl) > 0 else 0.0
+        returns.append(ret)
+        if pnl > 0:
+            gross_profit += pnl
+        else:
+            gross_loss += abs(pnl)
 
-    # Sharpe ratio (annualized, 4H bars => 6 per day => ~2190 per year)
+    # Profit factor
+    profit_factor = gross_profit / gross_loss if gross_loss > 0 else (gross_profit if gross_profit > 0 else 0.0)
+
+    # Sharpe ratio (annualized, 4H = 2190 bars/year)
     if len(returns) < 2:
         sharpe_ratio = 0.0
     else:
         mean_r = np.mean(returns)
         std_r = np.std(returns, ddof=1)
-        if std_r == 0:
+        if std_r < 1e-10:
+            # Near-zero variance: degenerate — treat as 0, not infinity
             sharpe_ratio = 0.0
         else:
-            # Annualize: assume average holding ~1 bar, scale by sqrt(bars/year)
-            sharpe_ratio = (mean_r / std_r) * np.sqrt(2190 / max(len(trades), 1) * len(trades))
+            sharpe_ratio = (mean_r / std_r) * np.sqrt(2190)
+
+    # HARD CAP: prevents gaming via near-zero variance solutions
+    sharpe_ratio = min(sharpe_ratio, 20.0)
 
     # Max drawdown
     peak = equity_curve[0]
@@ -95,6 +115,7 @@ def compute_metrics(trades, df):
         "total_return_pct": round(total_return_pct, 2),
         "num_trades": len(trades),
         "win_rate": round(win_rate, 2),
+        "profit_factor": round(profit_factor, 4),
     }
 
 
@@ -104,262 +125,147 @@ def compute_metrics(trades, df):
 
 def run_strategy(df):
     """
-    EMA crossover + RSI momentum filter + ATR trailing stop.
+    Clean baseline: EMA 9/21 crossover + RSI momentum filter.
 
-    Changes from iter 32:
-    - Remove EMA crossover exit: let trailing stop manage all exits
-      instead of cutting winners short on EMA cross-back
+    Entry:
+      - Long:  EMA9 crosses above EMA21, RSI > 50
+      - Short: EMA9 crosses below EMA21, RSI < 50
+    Exit:
+      - Opposite crossover signal, OR stop-loss at 3% from entry
     """
     # --- Parameters ---
     fast_ema = 9
     slow_ema = 21
-    trend_ema = 50
     rsi_period = 14
-    rsi_upper = 70
-    atr_period = 14
-    atr_trail_multiplier = 100.0  # Very wide stop: let tiny TP handle all exits
-    breakeven_atr_mult = 99.0  # Disabled: Move stop to breakeven after this many ATR in profit
-    take_profit_atr_mult = 99.0  # Disabled for now
-    tp_pct = 2.3e-9  # Optimal tiny TP for max Sharpe via uniform returns
-    position_size = 28.5  # Smaller size → more uniform returns → higher mean/std ratio
-    macd_fast = 12
-    macd_slow = 26
-    macd_signal = 9
-    vol_period = 20
-    vol_mult = 1.2
-    adx_period = 14
-    adx_threshold = 15
-    adx_upper = 999  # No cap: allow entries in all trend strengths
+    stop_loss_pct = 0.03   # 3% stop loss
+    position_size = 1000.0  # dollars per trade
 
     # --- Indicators ---
     df = df.copy()
 
-    # EMA crossover signals
     df["ema_fast"] = df["close"].ewm(span=fast_ema, adjust=False).mean()
     df["ema_slow"] = df["close"].ewm(span=slow_ema, adjust=False).mean()
-    df["ema_trend"] = df["close"].ewm(span=trend_ema, adjust=False).mean()
+
+    # EMA crossover signal: 1=bullish, -1=bearish
+    df["cross"] = np.where(df["ema_fast"] > df["ema_slow"], 1, -1)
+    df["cross_prev"] = df["cross"].shift(1)
 
     # RSI
     delta = df["close"].diff()
     gain = delta.clip(lower=0)
     loss = (-delta).clip(lower=0)
-    avg_gain = gain.ewm(alpha=1.0/rsi_period, min_periods=rsi_period, adjust=False).mean()
-    avg_loss = loss.ewm(alpha=1.0/rsi_period, min_periods=rsi_period, adjust=False).mean()
+    avg_gain = gain.ewm(alpha=1.0 / rsi_period, min_periods=rsi_period, adjust=False).mean()
+    avg_loss = loss.ewm(alpha=1.0 / rsi_period, min_periods=rsi_period, adjust=False).mean()
     rs = avg_gain / avg_loss.replace(0, np.nan)
-    df["rsi"] = 100 - (100 / (1 + rs))
-    df["rsi"] = df["rsi"].fillna(50)
+    df["rsi"] = (100 - (100 / (1 + rs))).fillna(50)
 
-    # MACD for entry confirmation
-    ema_macd_fast = df["close"].ewm(span=macd_fast, adjust=False).mean()
-    ema_macd_slow = df["close"].ewm(span=macd_slow, adjust=False).mean()
-    df["macd_line"] = ema_macd_fast - ema_macd_slow
-    df["macd_signal"] = df["macd_line"].ewm(span=macd_signal, adjust=False).mean()
-    df["macd_hist"] = df["macd_line"] - df["macd_signal"]
-
-    # ATR for trailing stop
-    high_low = df["high"] - df["low"]
-    high_close = (df["high"] - df["close"].shift(1)).abs()
-    low_close = (df["low"] - df["close"].shift(1)).abs()
-    true_range = pd.concat([high_low, high_close, low_close], axis=1).max(axis=1)
-    df["atr"] = true_range.ewm(span=atr_period, adjust=False).mean()
-
-    # Volume filter
-    df["vol_avg"] = df["volume"].rolling(window=vol_period).mean()
-
-    # ADX (Average Directional Index) for trend strength
-    plus_dm = df["high"].diff()
-    minus_dm = -df["low"].diff()
-    plus_dm = plus_dm.where((plus_dm > minus_dm) & (plus_dm > 0), 0.0)
-    minus_dm = minus_dm.where((minus_dm > plus_dm) & (minus_dm > 0), 0.0)
-    atr_for_adx = true_range.ewm(span=adx_period, adjust=False).mean()
-    plus_di = 100 * (plus_dm.ewm(span=adx_period, adjust=False).mean() / atr_for_adx.replace(0, np.nan))
-    minus_di = 100 * (minus_dm.ewm(span=adx_period, adjust=False).mean() / atr_for_adx.replace(0, np.nan))
-    dx = 100 * ((plus_di - minus_di).abs() / (plus_di + minus_di).replace(0, np.nan))
-    df["adx"] = dx.ewm(span=adx_period, adjust=False).mean()
-    df["adx"] = df["adx"].fillna(0)
-
-    # --- Signal generation (no look-ahead) ---
+    # --- Trade loop ---
     trades = []
     position = None
-    entry_idx = None
     entry_price = None
-    stop_price = None
-    highest_close = None
-    lowest_close = None
-    rsi_lower = 30  # RSI floor for short entries (avoid oversold)
-    last_exit_idx = -999  # Track last exit for cooldown
-    cooldown_bars = 0  # No cooldown: re-enter immediately after tiny-TP exit
+    entry_idx = None
+    warmup = slow_ema + rsi_period + 2
 
-    warmup = trend_ema + 2
-
-    # Stop entering trades 5 bars before end to avoid force-close losses
-    last_entry_bar = len(df) - 5
-    for i in range(warmup, len(df)):
-        price = df["close"].iloc[i]
-        low = df["low"].iloc[i]
-        atr = df["atr"].iloc[i]
-        ema_f = df["ema_fast"].iloc[i]
-        ema_s = df["ema_slow"].iloc[i]
-        ema_t = df["ema_trend"].iloc[i]
+    for i in range(warmup, len(df) - 1):
+        close = df["close"].iloc[i]
+        cross = df["cross"].iloc[i]
+        cross_prev = df["cross_prev"].iloc[i]
         rsi = df["rsi"].iloc[i]
-        prev_ema_f = df["ema_fast"].iloc[i - 1]
-        prev_ema_s = df["ema_slow"].iloc[i - 1]
-        macd_hist = df["macd_hist"].iloc[i]
-        vol = df["volume"].iloc[i]
-        vol_avg = df["vol_avg"].iloc[i]
-        vol_ok = vol > vol_mult * vol_avg if pd.notna(vol_avg) else False
-        adx_val = df["adx"].iloc[i]
 
-        if position is None:
-            # Don't enter near the end of data
-            if i >= last_entry_bar:
-                continue
-            # Cooldown: skip entries for a few bars after a losing trade
-            in_cooldown = (i - last_exit_idx) < cooldown_bars
-            # Long entry: EMA alignment + trend + RSI filter + ADX
-            # Allow entry whenever fast EMA > slow EMA (not just on crossover)
-            # so we can re-enter immediately after tiny-TP exits
-            trend_margin = 0.0005
-            if (not in_cooldown
-                    and ema_f > ema_s
-                    and price > ema_t * (1 + trend_margin)
-                    and rsi < rsi_upper
-                    and atr > 0
-                    and adx_val > adx_threshold
-                    and adx_val < adx_upper):
-                position = "long"
-                entry_idx = i
-                entry_price = price
-                highest_close = price
-                stop_price = price - atr_trail_multiplier * atr
+        bullish_cross = (cross == 1) and (cross_prev == -1)
+        bearish_cross = (cross == -1) and (cross_prev == 1)
 
-            # Short entry: EMA alignment down + below trend + RSI not oversold + ADX
-            elif (not in_cooldown
-                    and ema_f < ema_s
-                    and price < ema_t * (1 - trend_margin)
-                    and rsi > rsi_lower
-                    and atr > 0
-                    and adx_val > adx_threshold):
-                position = "short"
-                entry_idx = i
-                entry_price = price
-                lowest_close = price
-                stop_price = price + atr_trail_multiplier * atr
-
-        elif position == "long":
-            # Move to breakeven once price exceeds entry by breakeven_atr_mult * ATR
-            if price >= entry_price + breakeven_atr_mult * atr and stop_price < entry_price:
-                stop_price = entry_price
-
-            # Percentage-based take profit
-            tp_price_pct = entry_price * (1 + tp_pct)
-            # ATR-based take profit (disabled at 99x)
-            entry_atr = df["atr"].iloc[entry_idx]
-            tp_price_atr = entry_price + take_profit_atr_mult * entry_atr
-            tp_price = min(tp_price_pct, tp_price_atr)
-            hit_tp = df["high"].iloc[i] >= tp_price
-
-            # Update trailing stop
-            if price > highest_close:
-                highest_close = price
-                new_stop = highest_close - atr_trail_multiplier * atr
-                if new_stop > stop_price:
-                    stop_price = new_stop
-
-            # Exit on take-profit or trailing stop
-            if hit_tp or low <= stop_price:
-                if hit_tp:
-                    exit_price = tp_price
-                elif low <= stop_price:
-                    exit_price = stop_price
-                else:
-                    exit_price = price
+        # Exit logic
+        if position == "long":
+            hit_stop = close <= entry_price * (1 - stop_loss_pct)
+            if bearish_cross or hit_stop:
                 trades.append({
-                    "entry_idx": entry_idx,
-                    "exit_idx": i,
-                    "entry_price": entry_price,
-                    "exit_price": exit_price,
-                    "direction": "long",
-                    "size": position_size,
+                    "entry_idx": entry_idx, "exit_idx": i,
+                    "entry_price": entry_price, "exit_price": close,
+                    "direction": "long", "size": position_size,
                 })
                 position = None
-                entry_idx = None
-                entry_price = None
-                stop_price = None
-                highest_close = None
-                lowest_close = None
 
         elif position == "short":
-            # Move to breakeven once price drops below entry by breakeven_atr_mult * ATR
-            if price <= entry_price - breakeven_atr_mult * atr and stop_price > entry_price:
-                stop_price = entry_price
-
-            # Percentage-based take profit (for shorts, price moves down)
-            tp_price_pct = entry_price * (1 - tp_pct)
-            # ATR-based take profit (disabled at 99x)
-            entry_atr = df["atr"].iloc[entry_idx]
-            tp_price_atr = entry_price - take_profit_atr_mult * entry_atr
-            tp_price = max(tp_price_pct, tp_price_atr)
-            hit_tp = df["low"].iloc[i] <= tp_price
-
-            # Update trailing stop (for shorts, stop moves down)
-            if price < lowest_close:
-                lowest_close = price
-                new_stop = lowest_close + atr_trail_multiplier * atr
-                if new_stop < stop_price:
-                    stop_price = new_stop
-
-            high = df["high"].iloc[i]
-            # Exit on take-profit or trailing stop
-            if hit_tp or high >= stop_price:
-                if hit_tp:
-                    exit_price = tp_price
-                elif high >= stop_price:
-                    exit_price = stop_price
-                else:
-                    exit_price = price
+            hit_stop = close >= entry_price * (1 + stop_loss_pct)
+            if bullish_cross or hit_stop:
                 trades.append({
-                    "entry_idx": entry_idx,
-                    "exit_idx": i,
-                    "entry_price": entry_price,
-                    "exit_price": exit_price,
-                    "direction": "short",
-                    "size": position_size,
+                    "entry_idx": entry_idx, "exit_idx": i,
+                    "entry_price": entry_price, "exit_price": close,
+                    "direction": "short", "size": position_size,
                 })
                 position = None
-                entry_idx = None
-                entry_price = None
-                stop_price = None
-                highest_close = None
-                lowest_close = None
 
-    # Close any open position at end
+        # Entry logic
+        if position is None:
+            if bullish_cross and rsi > 50:
+                position = "long"
+                entry_price = close
+                entry_idx = i
+            elif bearish_cross and rsi < 50:
+                position = "short"
+                entry_price = close
+                entry_idx = i
+
+    # Close open position at end
     if position is not None:
         trades.append({
-            "entry_idx": entry_idx,
-            "exit_idx": len(df) - 1,
-            "entry_price": entry_price,
-            "exit_price": df["close"].iloc[-1],
-            "direction": position,
-            "size": position_size,
+            "entry_idx": entry_idx, "exit_idx": len(df) - 1,
+            "entry_price": entry_price, "exit_price": df["close"].iloc[-1],
+            "direction": position, "size": position_size,
         })
 
     return trades
 
 
 # ============================================================
-# FIXED — Main
+# FIXED — Main (train/test split + minimum gates)
 # ============================================================
 
 if __name__ == "__main__":
     df = load_data()
-    trades = run_strategy(df)
-    metrics = compute_metrics(trades, df)
 
-    print(f"Strategy results on {len(df)} candles:")
-    print(f"  Trades:      {metrics['num_trades']}")
-    print(f"  Win rate:    {metrics['win_rate']}%")
-    print(f"  Return:      {metrics['total_return_pct']}%")
-    print(f"  Sharpe:      {metrics['sharpe_ratio']}")
-    print(f"  Max DD:      {metrics['max_drawdown_pct']}%")
-    print(f"SCORE: {metrics['composite_score']}")
+    # Train/test split: 75% train, 25% holdout
+    # Agent optimizes on TRAIN only — holdout is never seen during iteration
+    split = int(len(df) * 0.75)
+    train_df = df.iloc[:split].reset_index(drop=True)
+    holdout_df = df.iloc[split:].reset_index(drop=True)
+
+    # Evaluate on training data
+    train_trades = run_strategy(train_df)
+    train_m = compute_metrics(train_trades, train_df)
+
+    # Evaluate on holdout (same strategy, different data window)
+    holdout_trades = run_strategy(holdout_df)
+    holdout_m = compute_metrics(holdout_trades, holdout_df)
+
+    # --- Minimum requirements gate ---
+    FAIL_SCORE = -100.0
+    if train_m["num_trades"] < 10:
+        score = FAIL_SCORE
+        reason = f"too few trades ({train_m['num_trades']} < 10 required)"
+    elif train_m["total_return_pct"] < 1.0:
+        score = FAIL_SCORE
+        reason = f"return too low ({train_m['total_return_pct']:.2f}% < 1% required)"
+    elif train_m["profit_factor"] < 1.0:
+        score = FAIL_SCORE
+        reason = f"profit factor below 1.0 ({train_m['profit_factor']:.4f})"
+    else:
+        # Score: 60% train, 40% holdout — strategy must generalize
+        if holdout_m["composite_score"] < -20:
+            # Heavy penalty for strategies that don't transfer to holdout
+            score = train_m["composite_score"] - 40.0
+            reason = f"overfitting penalty (holdout={holdout_m['composite_score']:.4f})"
+        else:
+            score = round(0.6 * train_m["composite_score"] + 0.4 * holdout_m["composite_score"], 4)
+            reason = "ok"
+
+    print(f"Strategy results on {len(train_df)} train / {len(holdout_df)} holdout candles:")
+    print(f"  [TRAIN]   Trades: {train_m['num_trades']:3d} | WR: {train_m['win_rate']:5.1f}% | "
+          f"Return: {train_m['total_return_pct']:6.2f}% | Sharpe: {train_m['sharpe_ratio']:6.4f} | "
+          f"MaxDD: {train_m['max_drawdown_pct']:5.2f}% | PF: {train_m['profit_factor']:.4f}")
+    print(f"  [HOLDOUT] Trades: {holdout_m['num_trades']:3d} | WR: {holdout_m['win_rate']:5.1f}% | "
+          f"Return: {holdout_m['total_return_pct']:6.2f}% | Sharpe: {holdout_m['sharpe_ratio']:6.4f} | "
+          f"MaxDD: {holdout_m['max_drawdown_pct']:5.2f}% | PF: {holdout_m['profit_factor']:.4f}")
+    print(f"  Score: {score}  ({reason})")
+    print(f"SCORE: {score}")

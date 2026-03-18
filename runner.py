@@ -35,7 +35,7 @@ def save_state(state):
         json.dump(s, f, indent=2)
 
 
-def run_backtest(timeout=60):
+def run_backtest(timeout=120):
     """Run backtest.py and return (score, stdout, success)."""
     try:
         result = subprocess.run(
@@ -63,7 +63,7 @@ def run_backtest(timeout=60):
         return score, stdout, True
 
     except subprocess.TimeoutExpired:
-        print("  backtest.py timed out (>60s)")
+        print("  backtest.py timed out (>120s)")
         return None, "", False
     except Exception as e:
         print(f"  Error running backtest: {e}")
@@ -143,7 +143,7 @@ Make your change now by editing backtest.py directly."""
         result = subprocess.run(
             ["claude", "--print", "-p", prompt, "--allowedTools",
              "Read", "Edit", "Write", "Bash"],
-            capture_output=True, text=True, timeout=120
+            capture_output=True, text=True, timeout=200
         )
         if result.returncode != 0:
             print(f"  Agent call failed (rc={result.returncode})")

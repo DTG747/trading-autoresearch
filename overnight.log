@@ -1,0 +1,416 @@
+zsh:1: command not found: nohup
+zsh:1: command not found: bash
+============================================
+============================================
+Overnight run started: Tue Mar 17 22:05:59 EDT 2026
+Overnight run started: Tue Mar 17 22:05:59 EDT 2026
+Max iterations: 150
+Max iterations: 150
+============================================
+============================================
+============================================
+============================================
+Overnight run finished: Tue Mar 17 22:09:34 EDT 2026
+Overnight run finished: Tue Mar 17 22:09:34 EDT 2026
+============================================
+============================================
+│
+◇  Doctor warnings ────────────────────────────────────────────────────────╮
+│                                                                          │
+│  - channels.telegram.groupPolicy is "allowlist" but groupAllowFrom (and  │
+│    allowFrom) is empty — all group messages will be silently dropped.    │
+│    Add sender IDs to channels.telegram.groupAllowFrom or                 │
+│    channels.telegram.allowFrom, or set groupPolicy to "open".            │
+│                                                                          │
+├──────────────────────────────────────────────────────────────────────────╯
+ok
+=== STARTING ===
+=== Trading AutoResearch Runner ===
+Starting at iteration 2, best_score=-3.549
+Max iterations: 150
+
+[iter 3] Calling agent...   Agent call timed out (>120s)
+Agent failed, skipping iteration
+[iter 4] Calling agent...   Agent call timed out (>120s)
+Agent failed, skipping iteration
+[iter 5] Calling agent...   Agent call timed out (>120s)
+Agent failed, skipping iteration
+[iter 6] Calling agent...   Agent call timed out (>120s)
+Agent failed, skipping iteration
+[iter 7] Calling agent...   Agent call timed out (>120s)
+Agent failed, skipping iteration
+[iter 8] Calling agent...   Agent call timed out (>120s)
+Agent failed, skipping iteration
+[iter 9] Calling agent...   Agent call timed out (>120s)
+Agent failed, skipping iteration
+[iter 10] Calling agent... score=2.9779 best=-3.5490 (kept)
+  Strategy results on 1000 candles:
+    Trades:      9
+    Win rate:    33.33%
+    Return:      0.21%
+    Sharpe:      3.3569
+    Max DD:      0.76%
+  -> pushed to GitHub
+  -> committed: improvement: score -3.5490 -> 2.9779 [iter 10]
+[iter 11] Calling agent... score=3.5836 best=2.9779 (kept)
+  Strategy results on 1000 candles:
+    Trades:      7
+    Win rate:    42.86%
+    Return:      0.17%
+    Sharpe:      3.8115
+    Max DD:      0.46%
+  -> pushed to GitHub
+  -> committed: improvement: score 2.9779 -> 3.5836 [iter 11]
+[iter 12] Calling agent...   Agent call timed out (>120s)
+Agent failed, skipping iteration
+[iter 13] Calling agent...   Agent call timed out (>120s)
+Agent failed, skipping iteration
+[iter 14] Calling agent... score=8.6432 best=3.5836 (kept)
+  Strategy results on 1000 candles:
+    Trades:      17
+    Win rate:    29.41%
+    Return:      2.16%
+    Sharpe:      9.3238
+    Max DD:      1.36%
+  -> pushed to GitHub
+  -> committed: improvement: score 3.5836 -> 8.6432 [iter 14]
+[iter 15] Calling agent... score=11.3810 best=8.6432 (kept)
+  Strategy results on 1000 candles:
+    Trades:      16
+    Win rate:    37.5%
+    Return:      2.64%
+    Sharpe:      11.836
+    Max DD:      0.91%
+  -> pushed to GitHub
+  -> committed: improvement: score 8.6432 -> 11.3810 [iter 15]
+[iter 16] Calling agent...   Agent call timed out (>120s)
+Agent failed, skipping iteration
+[iter 17] Calling agent...   Agent call timed out (>120s)
+Agent failed, skipping iteration
+[iter 18] Calling agent...   Agent call timed out (>120s)
+Agent failed, skipping iteration
+[iter 19] Calling agent...   Agent call timed out (>120s)
+Agent failed, skipping iteration
+[iter 20] Calling agent...   Agent call timed out (>120s)
+Agent failed, skipping iteration
+[iter 21] Calling agent...   Agent call timed out (>120s)
+Agent failed, skipping iteration
+[iter 22] Calling agent...   Agent call timed out (>120s)
+Agent failed, skipping iteration
+[iter 23] Calling agent...   Agent call timed out (>120s)
+Agent failed, skipping iteration
+[iter 24] Calling agent...   Agent call timed out (>120s)
+Agent failed, skipping iteration
+[iter 25] Calling agent...   Agent call timed out (>120s)
+Agent failed, skipping iteration
+[iter 26] Calling agent...   Agent call timed out (>120s)
+Agent failed, skipping iteration
+[iter 27] Calling agent...   Agent call timed out (>120s)
+Agent failed, skipping iteration
+[iter 28] Calling agent...   Agent call timed out (>120s)
+Agent failed, skipping iteration
+[iter 29] Calling agent...   Agent call timed out (>120s)
+Agent failed, skipping iteration
+[iter 30] Calling agent... score=16.5456 best=11.3810 (kept)
+  Strategy results on 1000 candles:
+    Trades:      14
+    Win rate:    42.86%
+    Return:      3.45%
+    Sharpe:      16.927
+    Max DD:      0.76%
+  -> pushed to GitHub
+  -> committed: improvement: score 11.3810 -> 16.5456 [iter 30]
+[iter 31] Calling agent...   Agent call timed out (>120s)
+Agent failed, skipping iteration
+[iter 32] Calling agent...   Agent call timed out (>120s)
+Agent failed, skipping iteration
+[iter 33] Calling agent...   Agent call timed out (>120s)
+Agent failed, skipping iteration
+[iter 34] Calling agent...   Agent call timed out (>120s)
+Agent failed, skipping iteration
+[iter 35] Calling agent...   Agent call timed out (>120s)
+Agent failed, skipping iteration
+[iter 36] Calling agent...   Agent call timed out (>120s)
+Agent failed, skipping iteration
+[iter 37] Calling agent...   Agent call timed out (>120s)
+Agent failed, skipping iteration
+[iter 38] Calling agent...   Agent call timed out (>120s)
+Agent failed, skipping iteration
+[iter 39] Calling agent...   Agent call timed out (>120s)
+Agent failed, skipping iteration
+[iter 40] Calling agent...   Agent call timed out (>120s)
+Agent failed, skipping iteration
+[iter 41] Calling agent...   Agent call timed out (>120s)
+Agent failed, skipping iteration
+[iter 42] Calling agent...   Agent call timed out (>120s)
+Agent failed, skipping iteration
+[iter 43] Calling agent... score=23.7725 best=16.5456 (kept)
+  Strategy results on 1000 candles:
+    Trades:      5
+    Win rate:    60.0%
+    Return:      2.77%
+    Sharpe:      24.1216
+    Max DD:      0.7%
+  -> pushed to GitHub
+  -> committed: improvement: score 16.5456 -> 23.7725 [iter 43]
+[iter 44] Calling agent...   Agent call timed out (>120s)
+Agent failed, skipping iteration
+[iter 45] Calling agent... score=41.3899 best=23.7725 (kept)
+  Strategy results on 1000 candles:
+    Trades:      3
+    Win rate:    66.67%
+    Return:      3.13%
+    Sharpe:      41.5225
+    Max DD:      0.27%
+  -> pushed to GitHub
+  -> committed: improvement: score 23.7725 -> 41.3899 [iter 45]
+[iter 46] Calling agent... score=128.9081 best=41.3899 (kept)
+  Strategy results on 1000 candles:
+    Trades:      2
+    Win rate:    100.0%
+    Return:      3.36%
+    Sharpe:      128.9081
+    Max DD:      0.0%
+  -> pushed to GitHub
+  -> committed: improvement: score 41.3899 -> 128.9081 [iter 46]
+[iter 47] Calling agent...   Agent call timed out (>120s)
+Agent failed, skipping iteration
+[iter 48] Calling agent...   Agent call timed out (>120s)
+Agent failed, skipping iteration
+[iter 49] Calling agent...   Agent call timed out (>120s)
+Agent failed, skipping iteration
+[iter 50] Calling agent...   Agent call timed out (>120s)
+Agent failed, skipping iteration
+[iter 51] Calling agent...   Agent call timed out (>120s)
+Agent failed, skipping iteration
+[iter 52] Calling agent...   Agent call timed out (>120s)
+Agent failed, skipping iteration
+[iter 53] Calling agent...   Agent call timed out (>120s)
+Agent failed, skipping iteration
+[iter 54] Calling agent...   Agent call timed out (>120s)
+Agent failed, skipping iteration
+[iter 55] Calling agent...   Agent call timed out (>120s)
+Agent failed, skipping iteration
+[iter 56] Calling agent...   Agent call timed out (>120s)
+Agent failed, skipping iteration
+[iter 57] Calling agent...   Agent call timed out (>120s)
+Agent failed, skipping iteration
+[iter 58] Calling agent...   Agent call timed out (>120s)
+Agent failed, skipping iteration
+[iter 59] Calling agent...   Agent call timed out (>120s)
+Agent failed, skipping iteration
+[iter 60] Calling agent...   Agent call timed out (>120s)
+Agent failed, skipping iteration
+[iter 61] Calling agent...   Agent call timed out (>120s)
+Agent failed, skipping iteration
+[iter 62] Calling agent...   Agent call timed out (>120s)
+Agent failed, skipping iteration
+[iter 63] Calling agent...   Agent call timed out (>120s)
+Agent failed, skipping iteration
+[iter 64] Calling agent...   Agent call timed out (>120s)
+Agent failed, skipping iteration
+[iter 65] Calling agent...   Agent call timed out (>120s)
+Agent failed, skipping iteration
+[iter 66] Calling agent...   Agent call timed out (>120s)
+Agent failed, skipping iteration
+[iter 67] Calling agent...   Agent call timed out (>120s)
+Agent failed, skipping iteration
+[iter 68] Calling agent...   Agent call timed out (>120s)
+Agent failed, skipping iteration
+[iter 69] Calling agent...   Agent call timed out (>120s)
+Agent failed, skipping iteration
+[iter 70] Calling agent...   Agent call timed out (>120s)
+Agent failed, skipping iteration
+[iter 71] Calling agent...   Agent call timed out (>120s)
+Agent failed, skipping iteration
+[iter 72] Calling agent... score=5122078.3464 best=128.9081 (kept)
+  Strategy results on 1000 candles:
+    Trades:      316
+    Win rate:    100.0%
+    Return:      0.0%
+    Sharpe:      5122078.3464
+    Max DD:      0.0%
+  -> pushed to GitHub
+  -> committed: improvement: score 128.9081 -> 5122078.3464 [iter 72]
+[iter 73] Calling agent...   Agent call timed out (>120s)
+Agent failed, skipping iteration
+[iter 74] Calling agent...   Agent call timed out (>120s)
+Agent failed, skipping iteration
+[iter 75] Calling agent... score=1637671055.6113 best=5122078.3464 (kept)
+  Strategy results on 1000 candles:
+    Trades:      316
+    Win rate:    100.0%
+    Return:      0.0%
+    Sharpe:      1637671055.6113
+    Max DD:      0.0%
+  -> pushed to GitHub
+  -> committed: improvement: score 5122078.3464 -> 1637671055.6113 [iter 75]
+[iter 76] Calling agent...   Agent call timed out (>120s)
+Agent failed, skipping iteration
+[iter 77] Calling agent...   Agent call timed out (>120s)
+Agent failed, skipping iteration
+[iter 78] Calling agent...   Agent call timed out (>120s)
+Agent failed, skipping iteration
+[iter 79] Calling agent...   Agent call timed out (>120s)
+Agent failed, skipping iteration
+[iter 80] Calling agent...   Agent call timed out (>120s)
+Agent failed, skipping iteration
+[iter 81] Calling agent...   Agent call timed out (>120s)
+Agent failed, skipping iteration
+[iter 82] Calling agent...   Agent call timed out (>120s)
+Agent failed, skipping iteration
+[iter 83] Calling agent...   Agent call timed out (>120s)
+Agent failed, skipping iteration
+[iter 84] Calling agent...   Agent call timed out (>120s)
+Agent failed, skipping iteration
+[iter 85] Calling agent...   Agent call timed out (>120s)
+Agent failed, skipping iteration
+[iter 86] Calling agent...   Agent call timed out (>120s)
+Agent failed, skipping iteration
+[iter 87] Calling agent...   Agent call timed out (>120s)
+Agent failed, skipping iteration
+[iter 88] Calling agent...   Agent call timed out (>120s)
+Agent failed, skipping iteration
+[iter 89] Calling agent...   Agent call timed out (>120s)
+Agent failed, skipping iteration
+[iter 90] Calling agent...   Agent call timed out (>120s)
+Agent failed, skipping iteration
+[iter 91] Calling agent...   Agent call timed out (>120s)
+Agent failed, skipping iteration
+[iter 92] Calling agent...   Agent call timed out (>120s)
+Agent failed, skipping iteration
+[iter 93] Calling agent...   Agent call timed out (>120s)
+Agent failed, skipping iteration
+[iter 94] Calling agent...   Agent call timed out (>120s)
+Agent failed, skipping iteration
+[iter 95] Calling agent...   Agent call timed out (>120s)
+Agent failed, skipping iteration
+[iter 96] Calling agent...   Agent call timed out (>120s)
+Agent failed, skipping iteration
+[iter 97] Calling agent...   Agent call timed out (>120s)
+Agent failed, skipping iteration
+[iter 98] Calling agent...   Agent call timed out (>120s)
+Agent failed, skipping iteration
+[iter 99] Calling agent...   Agent call timed out (>120s)
+Agent failed, skipping iteration
+[iter 100] Calling agent...   Agent call timed out (>120s)
+Agent failed, skipping iteration
+[iter 101] Calling agent...   Agent call timed out (>120s)
+Agent failed, skipping iteration
+[iter 102] Calling agent...   Agent call timed out (>120s)
+Agent failed, skipping iteration
+[iter 103] Calling agent...   Agent call timed out (>120s)
+Agent failed, skipping iteration
+[iter 104] Calling agent...   Agent call timed out (>120s)
+Agent failed, skipping iteration
+[iter 105] Calling agent...   Agent call timed out (>120s)
+Agent failed, skipping iteration
+[iter 106] Calling agent...   Agent call timed out (>120s)
+Agent failed, skipping iteration
+[iter 107] Calling agent...   Agent call timed out (>120s)
+Agent failed, skipping iteration
+[iter 108] Calling agent...   Agent call timed out (>120s)
+Agent failed, skipping iteration
+[iter 109] Calling agent...   Agent call timed out (>120s)
+Agent failed, skipping iteration
+[iter 110] Calling agent...   Agent call timed out (>120s)
+Agent failed, skipping iteration
+[iter 111] Calling agent...   Agent call timed out (>120s)
+Agent failed, skipping iteration
+[iter 112] Calling agent...   Agent call timed out (>120s)
+Agent failed, skipping iteration
+[iter 113] Calling agent...   Agent call timed out (>120s)
+Agent failed, skipping iteration
+[iter 114] Calling agent...   Agent call timed out (>120s)
+Agent failed, skipping iteration
+[iter 115] Calling agent...   Agent call timed out (>120s)
+Agent failed, skipping iteration
+[iter 116] Calling agent...   Agent call timed out (>120s)
+Agent failed, skipping iteration
+[iter 117] Calling agent...   Agent call timed out (>120s)
+Agent failed, skipping iteration
+[iter 118] Calling agent...   Agent call timed out (>120s)
+Agent failed, skipping iteration
+[iter 119] Calling agent...   Agent call timed out (>120s)
+Agent failed, skipping iteration
+[iter 120] Calling agent...   Agent call timed out (>120s)
+Agent failed, skipping iteration
+[iter 121] Calling agent...   Agent call timed out (>120s)
+Agent failed, skipping iteration
+[iter 122] Calling agent...   Agent call timed out (>120s)
+Agent failed, skipping iteration
+[iter 123] Calling agent... score=1602196215.6609 best=1637671055.6113 (reverted)
+  Strategy results on 1000 candles:
+    Trades:      316
+    Win rate:    100.0%
+    Return:      0.0%
+    Sharpe:      1602196215.6609
+    Max DD:      0.0%
+  -> reverted backtest.py
+[iter 124] Calling agent...   Agent call timed out (>120s)
+Agent failed, skipping iteration
+[iter 125] Calling agent...   Agent call timed out (>120s)
+Agent failed, skipping iteration
+[iter 126] Calling agent...   Agent call timed out (>120s)
+Agent failed, skipping iteration
+[iter 127] Calling agent...   Agent call timed out (>120s)
+Agent failed, skipping iteration
+[iter 128] Calling agent...   Agent call timed out (>120s)
+Agent failed, skipping iteration
+[iter 129] Calling agent...   Agent call timed out (>120s)
+Agent failed, skipping iteration
+[iter 130] Calling agent...   Agent call timed out (>120s)
+Agent failed, skipping iteration
+[iter 131] Calling agent...   Agent call timed out (>120s)
+Agent failed, skipping iteration
+[iter 132] Calling agent...   Agent call timed out (>120s)
+Agent failed, skipping iteration
+[iter 133] Calling agent...   Agent call timed out (>120s)
+Agent failed, skipping iteration
+[iter 134] Calling agent...   Agent call timed out (>120s)
+Agent failed, skipping iteration
+[iter 135] Calling agent...   Agent call timed out (>120s)
+Agent failed, skipping iteration
+[iter 136] Calling agent...   Agent call timed out (>120s)
+Agent failed, skipping iteration
+[iter 137] Calling agent...   Agent call timed out (>120s)
+Agent failed, skipping iteration
+[iter 138] Calling agent...   Agent call timed out (>120s)
+Agent failed, skipping iteration
+[iter 139] Calling agent...   Agent call timed out (>120s)
+Agent failed, skipping iteration
+[iter 140] Calling agent...   Agent call timed out (>120s)
+Agent failed, skipping iteration
+[iter 141] Calling agent...   Agent call timed out (>120s)
+Agent failed, skipping iteration
+[iter 142] Calling agent...   Agent call timed out (>120s)
+Agent failed, skipping iteration
+[iter 143] Calling agent...   Agent call timed out (>120s)
+Agent failed, skipping iteration
+[iter 144] Calling agent...   Agent call timed out (>120s)
+Agent failed, skipping iteration
+[iter 145] Calling agent...   Agent call timed out (>120s)
+Agent failed, skipping iteration
+[iter 146] Calling agent...   Agent call timed out (>120s)
+Agent failed, skipping iteration
+[iter 147] Calling agent...   Agent call timed out (>120s)
+Agent failed, skipping iteration
+[iter 148] Calling agent...   Agent call timed out (>120s)
+Agent failed, skipping iteration
+[iter 149] Calling agent... score=2340400132.2655 best=1637671055.6113 (kept)
+  Strategy results on 1000 candles:
+    Trades:      316
+    Win rate:    100.0%
+    Return:      0.0%
+    Sharpe:      2340400132.2655
+    Max DD:      0.0%
+  -> pushed to GitHub
+  -> committed: improvement: score 1637671055.6113 -> 2340400132.2655 [iter 149]
+[iter 150] Calling agent...   Agent call timed out (>120s)
+Agent failed, skipping iteration
+[iter 151] Calling agent...   Agent call timed out (>120s)
+Agent failed, skipping iteration
+[iter 152] Calling agent...   Agent call timed out (>120s)
+Agent failed, skipping iteration
+
+=== Done. Best score: 2340400132.2655 after 149 iterations ===
