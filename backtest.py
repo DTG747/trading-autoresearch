@@ -143,12 +143,12 @@ def run_strategy(df):
     atr_period = 14
     adx_period = 14
     adx_threshold = 25     # minimum ADX to confirm trend (stricter)
-    atr_sl_mult = 1.2      # stop loss = 1.2x ATR
+    atr_sl_mult = 1.1      # stop loss = 1.1x ATR
     atr_tp_mult = 4.0      # take profit = 4.0x ATR
     atr_trail_mult = 1.3   # trailing stop distance
     atr_trail_tight = 0.9  # tighter trail once trade is well in profit
     trail_tighten_threshold = 1.8  # tighten trail after price moves 1.8x ATR in favor
-    position_size = 248.0
+    position_size = 276.0
     max_hold_bars = 30      # max bars to hold a position
     breakeven_atr_mult = 0.55  # move stop to entry after price moves 0.55x ATR in favor (faster BE)
     vol_period = 20         # volume moving average period
@@ -232,7 +232,7 @@ def run_strategy(df):
     short_pullback_ready = False
     last_trade_exit = -999
     last_trade_won = True
-    cooldown_bars = 2  # bars to wait after a loss before re-entering
+    cooldown_bars = 3  # bars to wait after a loss before re-entering
 
     for i in range(warmup, len(df) - 1):
         close = df["close"].iloc[i]
@@ -344,7 +344,7 @@ def run_strategy(df):
             # ADX 25 -> 0.7x size, ADX 40+ -> 1.0x size
             adx_scale = min(1.0, 0.7 + 0.3 * (adx - adx_threshold) / 15.0) if adx > adx_threshold else 0.7
             # Reduce size after a loss to limit consecutive-loss drawdown
-            loss_scale = 0.7 if not last_trade_won and (i - last_trade_exit < 10) else 1.0
+            loss_scale = 0.65 if not last_trade_won and (i - last_trade_exit < 35) else 1.0
             trade_size = position_size * adx_scale * loss_scale
 
             if not in_cooldown and uptrend and strong_trend and volume_confirmed and long_pullback_ready and rsi > rsi_recover_low and rsi < 70:
