@@ -142,20 +142,25 @@ def run_strategy(df):
     rsi_period = 14
     atr_period = 14
     adx_period = 14
-    adx_threshold = 20     # minimum ADX to confirm trend
-    atr_sl_mult = 2.0      # stop loss = 2x ATR
+    adx_threshold = 22     # minimum ADX to confirm trend (stricter)
+    atr_sl_mult = 1.7      # stop loss = 1.7x ATR
     atr_tp_mult = 4.0      # take profit = 4x ATR
-    atr_trail_mult = 1.8   # trailing stop distance (tighter to lock profits)
+    atr_trail_mult = 1.4   # trailing stop distance
     position_size = 1000.0
-    max_hold_bars = 30      # max bars to hold a position
+    max_hold_bars = 25      # max bars to hold a position
+    breakeven_atr_mult = 1.2  # move stop to entry after price moves 1.2x ATR in favor
     vol_period = 20         # volume moving average period
     vol_mult = 0.8          # volume must be >= 0.8x average (filter only low-volume bars)
 
-    # RSI thresholds for pullback detection (slightly relaxed to get more entries)
+    # RSI thresholds for pullback detection
     rsi_pullback_low = 42
     rsi_recover_low = 46
     rsi_pullback_high = 58
     rsi_recover_high = 54
+
+    # Bollinger Band for volatility regime filter
+    bb_period = 20
+    bb_std = 2.0
 
     # --- Indicators ---
     df = df.copy()
@@ -198,6 +203,14 @@ def run_strategy(df):
     dx = 100 * ((plus_di - minus_di).abs() / (plus_di + minus_di).replace(0, np.nan))
     df["adx"] = dx.ewm(span=adx_period, adjust=False).mean().fillna(0)
 
+    # Bollinger Bands for volatility width
+    df["bb_mid"] = df["close"].rolling(window=bb_period).mean()
+    df["bb_std"] = df["close"].rolling(window=bb_period).std()
+    df["bb_upper"] = df["bb_mid"] + bb_std * df["bb_std"]
+    df["bb_lower"] = df["bb_mid"] - bb_std * df["bb_std"]
+    df["bb_width"] = (df["bb_upper"] - df["bb_lower"]) / df["bb_mid"].replace(0, np.nan)
+    df["bb_width_ma"] = df["bb_width"].rolling(window=bb_period).mean()
+
     # --- Trade loop ---
     trades = []
     position = None
@@ -222,10 +235,15 @@ def run_strategy(df):
         vol = df["volume"].iloc[i]
         vol_avg = df["vol_ma"].iloc[i]
 
+        bb_width = df["bb_width"].iloc[i]
+        bb_width_avg = df["bb_width_ma"].iloc[i]
+
         uptrend = ema_f > ema_s
         downtrend = ema_f < ema_s
         strong_trend = adx > adx_threshold
         volume_confirmed = vol >= vol_mult * vol_avg if pd.notna(vol_avg) else False
+        # Volatility expanding = trending market (good for trend-following)
+        vol_expanding = bb_width > bb_width_avg if pd.notna(bb_width_avg) and pd.notna(bb_width) else True
 
         # Track RSI pullback states
         if rsi < rsi_pullback_low:
@@ -239,7 +257,7 @@ def run_strategy(df):
         if not downtrend:
             short_pullback_ready = False
 
-        # Exit logic with trailing stop + time-based exit
+        # Exit logic with trailing stop + break-even + EMA cross exit
         if position == "long":
             if close > best_price:
                 best_price = close
@@ -247,10 +265,18 @@ def run_strategy(df):
                 if trail_stop > stop_price:
                     stop_price = trail_stop
 
+            # Break-even: once price moves 1.2x ATR in favor, move stop to entry
+            if best_price >= entry_price + breakeven_atr_mult * atr:
+                be_stop = entry_price
+                if be_stop > stop_price:
+                    stop_price = be_stop
+
             hit_stop = close <= stop_price
             hit_tp = close >= tp_price
             time_exit = (i - entry_idx) >= max_hold_bars
-            if hit_stop or hit_tp or time_exit:
+            # Exit if trend reverses (EMA cross)
+            trend_exit = ema_f < ema_s and (i - entry_idx) >= 3
+            if hit_stop or hit_tp or time_exit or trend_exit:
                 trades.append({
                     "entry_idx": entry_idx, "exit_idx": i,
                     "entry_price": entry_price, "exit_price": close,
@@ -265,10 +291,18 @@ def run_strategy(df):
                 if trail_stop < stop_price:
                     stop_price = trail_stop
 
+            # Break-even: once price moves 1.2x ATR in favor, move stop to entry
+            if best_price <= entry_price - breakeven_atr_mult * atr:
+                be_stop = entry_price
+                if be_stop < stop_price:
+                    stop_price = be_stop
+
             hit_stop = close >= stop_price
             hit_tp = close <= tp_price
             time_exit = (i - entry_idx) >= max_hold_bars
-            if hit_stop or hit_tp or time_exit:
+            # Exit if trend reverses (EMA cross)
+            trend_exit = ema_f > ema_s and (i - entry_idx) >= 3
+            if hit_stop or hit_tp or time_exit or trend_exit:
                 trades.append({
                     "entry_idx": entry_idx, "exit_idx": i,
                     "entry_price": entry_price, "exit_price": close,
@@ -276,7 +310,7 @@ def run_strategy(df):
                 })
                 position = None
 
-        # Entry logic: RSI pullback within trend
+        # Entry logic: RSI pullback within trend + volatility expansion
         if position is None:
             if uptrend and strong_trend and volume_confirmed and long_pullback_ready and rsi > rsi_recover_low and rsi < 70:
                 position = "long"
