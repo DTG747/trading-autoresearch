@@ -125,36 +125,42 @@ def compute_metrics(trades, df):
 
 def run_strategy(df):
     """
-    EMA 20/50 crossover + ADX trend filter + ATR trailing stop.
+    Trend-following with RSI pullback entries + ATR trailing stop + ADX filter.
 
-    Improvements over baseline:
-      - Wider EMAs (20/50) to reduce whipsaw in choppy markets
-      - ADX filter: only enter when ADX > 20 (confirmed trend)
-      - ATR-based initial stop loss (1.5x ATR)
-      - Trailing stop: after price moves 1.5x ATR favorably, trail stop at 1.5x ATR from best price
-      - RSI extreme filter: avoid buying overbought / selling oversold
+    Strategy:
+      - EMA 21/55 defines trend direction
+      - ADX > 20 confirms trend strength (filters choppy markets)
+      - Enter long on RSI pullback (RSI dips below 42 then recovers above 46) in uptrend
+      - Enter short on RSI pullback (RSI rises above 58 then drops below 54) in downtrend
+      - ATR-based stop loss with trailing mechanism
+      - Tighter trailing stop (1.8x ATR) to lock in profits earlier
+      - Max hold time of 30 bars to prevent extended drawdown periods
     """
     # --- Parameters ---
-    fast_ema = 20
-    slow_ema = 50
+    fast_ema = 21
+    slow_ema = 55
     rsi_period = 14
     atr_period = 14
     adx_period = 14
-    adx_threshold = 20
-    atr_sl_mult = 1.5    # stop loss = 1.5x ATR
-    atr_tp_mult = 3.0    # take profit = 3x ATR
+    adx_threshold = 20     # minimum ADX to confirm trend
+    atr_sl_mult = 2.0      # stop loss = 2x ATR
+    atr_tp_mult = 4.0      # take profit = 4x ATR
+    atr_trail_mult = 1.8   # trailing stop distance (tighter to lock profits)
     position_size = 1000.0
+    max_hold_bars = 30      # max bars to hold a position
+
+    # RSI thresholds for pullback detection (slightly relaxed to get more entries)
+    rsi_pullback_low = 42
+    rsi_recover_low = 46
+    rsi_pullback_high = 58
+    rsi_recover_high = 54
 
     # --- Indicators ---
     df = df.copy()
 
-    # EMAs
+    # EMAs for trend
     df["ema_fast"] = df["close"].ewm(span=fast_ema, adjust=False).mean()
     df["ema_slow"] = df["close"].ewm(span=slow_ema, adjust=False).mean()
-
-    # EMA crossover signal
-    df["cross"] = np.where(df["ema_fast"] > df["ema_slow"], 1, -1)
-    df["cross_prev"] = df["cross"].shift(1)
 
     # RSI
     delta = df["close"].diff()
@@ -176,40 +182,16 @@ def run_strategy(df):
     ], axis=1).max(axis=1)
     df["atr"] = tr.ewm(span=atr_period, adjust=False).mean()
 
-    # ADX
-    plus_dm = (high - high.shift(1)).clip(lower=0)
-    minus_dm = (low.shift(1) - low).clip(lower=0)
-    # Zero out when the other is larger
-    plus_dm = np.where(plus_dm > minus_dm, plus_dm, 0.0)
-    minus_dm_arr = np.where(minus_dm > pd.Series(np.where(plus_dm > 0, 0, minus_dm.values), index=df.index), minus_dm, 0.0)
-    # Recalculate properly
-    raw_plus = (high - high.shift(1))
-    raw_minus = (low.shift(1) - low)
-    plus_dm = np.where((raw_plus > raw_minus) & (raw_plus > 0), raw_plus, 0.0)
-    minus_dm = np.where((raw_minus > raw_plus) & (raw_minus > 0), raw_minus, 0.0)
-
-    plus_dm_s = pd.Series(plus_dm, index=df.index).ewm(span=adx_period, adjust=False).mean()
-    minus_dm_s = pd.Series(minus_dm, index=df.index).ewm(span=adx_period, adjust=False).mean()
-
-    plus_di = 100 * plus_dm_s / df["atr"].replace(0, np.nan)
-    minus_di = 100 * minus_dm_s / df["atr"].replace(0, np.nan)
-
-    dx = (abs(plus_di - minus_di) / (plus_di + minus_di).replace(0, np.nan) * 100).fillna(0)
-    df["adx"] = dx.ewm(span=adx_period, adjust=False).mean()
-
-    # --- Volume filter ---
-    vol_ma_period = 20
-    df["vol_ma"] = df["volume"].rolling(window=vol_ma_period).mean()
-
-    # --- Bollinger Band for regime filter ---
-    bb_period = 20
-    bb_std = 2.0
-    df["bb_ma"] = df["close"].rolling(window=bb_period).mean()
-    df["bb_std"] = df["close"].rolling(window=bb_period).std()
-    df["bb_upper"] = df["bb_ma"] + bb_std * df["bb_std"]
-    df["bb_lower"] = df["bb_ma"] - bb_std * df["bb_std"]
-    df["bb_width"] = (df["bb_upper"] - df["bb_lower"]) / df["bb_ma"]
-    df["bb_width_ma"] = df["bb_width"].rolling(window=20).mean()
+    # ADX (Average Directional Index)
+    plus_dm = df["high"].diff()
+    minus_dm = -df["low"].diff()
+    plus_dm = plus_dm.where((plus_dm > minus_dm) & (plus_dm > 0), 0.0)
+    minus_dm = minus_dm.where((minus_dm > plus_dm) & (minus_dm > 0), 0.0)
+    atr_smooth = tr.ewm(span=adx_period, adjust=False).mean()
+    plus_di = 100 * (plus_dm.ewm(span=adx_period, adjust=False).mean() / atr_smooth.replace(0, np.nan))
+    minus_di = 100 * (minus_dm.ewm(span=adx_period, adjust=False).mean() / atr_smooth.replace(0, np.nan))
+    dx = 100 * ((plus_di - minus_di).abs() / (plus_di + minus_di).replace(0, np.nan))
+    df["adx"] = dx.ewm(span=adx_period, adjust=False).mean().fillna(0)
 
     # --- Trade loop ---
     trades = []
@@ -218,34 +200,49 @@ def run_strategy(df):
     entry_idx = None
     stop_price = None
     tp_price = None
-    warmup = slow_ema + adx_period + 5
+    best_price = None
+    warmup = slow_ema + 5
+
+    # Track RSI pullback state
+    long_pullback_ready = False
+    short_pullback_ready = False
 
     for i in range(warmup, len(df) - 1):
         close = df["close"].iloc[i]
-        cross = df["cross"].iloc[i]
-        cross_prev = df["cross_prev"].iloc[i]
         rsi = df["rsi"].iloc[i]
         atr = df["atr"].iloc[i]
+        ema_f = df["ema_fast"].iloc[i]
+        ema_s = df["ema_slow"].iloc[i]
         adx = df["adx"].iloc[i]
-        vol = df["volume"].iloc[i]
-        vol_ma = df["vol_ma"].iloc[i]
-        bb_width = df["bb_width"].iloc[i]
-        bb_width_ma = df["bb_width_ma"].iloc[i]
 
-        bullish_cross = (cross == 1) and (cross_prev == -1)
-        bearish_cross = (cross == -1) and (cross_prev == 1)
+        uptrend = ema_f > ema_s
+        downtrend = ema_f < ema_s
+        strong_trend = adx > adx_threshold
 
-        # Volume confirmation: entry volume should be above average
-        vol_ok = vol > vol_ma * 0.8
+        # Track RSI pullback states
+        if rsi < rsi_pullback_low:
+            long_pullback_ready = True
+        if rsi > rsi_pullback_high:
+            short_pullback_ready = True
 
-        # Volatility filter: only trade when BB width is expanding (trending, not choppy)
-        vol_expanding = bb_width > bb_width_ma * 0.9 if not np.isnan(bb_width_ma) else True
+        # Reset pullback flags if trend reverses
+        if not uptrend:
+            long_pullback_ready = False
+        if not downtrend:
+            short_pullback_ready = False
 
-        # Exit logic
+        # Exit logic with trailing stop + time-based exit
         if position == "long":
+            if close > best_price:
+                best_price = close
+                trail_stop = best_price - atr_trail_mult * atr
+                if trail_stop > stop_price:
+                    stop_price = trail_stop
+
             hit_stop = close <= stop_price
             hit_tp = close >= tp_price
-            if bearish_cross or hit_stop or hit_tp:
+            time_exit = (i - entry_idx) >= max_hold_bars
+            if hit_stop or hit_tp or time_exit:
                 trades.append({
                     "entry_idx": entry_idx, "exit_idx": i,
                     "entry_price": entry_price, "exit_price": close,
@@ -254,9 +251,16 @@ def run_strategy(df):
                 position = None
 
         elif position == "short":
+            if close < best_price:
+                best_price = close
+                trail_stop = best_price + atr_trail_mult * atr
+                if trail_stop < stop_price:
+                    stop_price = trail_stop
+
             hit_stop = close >= stop_price
             hit_tp = close <= tp_price
-            if bullish_cross or hit_stop or hit_tp:
+            time_exit = (i - entry_idx) >= max_hold_bars
+            if hit_stop or hit_tp or time_exit:
                 trades.append({
                     "entry_idx": entry_idx, "exit_idx": i,
                     "entry_price": entry_price, "exit_price": close,
@@ -264,20 +268,25 @@ def run_strategy(df):
                 })
                 position = None
 
-        # Entry logic — added BB width filter to avoid choppy markets
+        # Entry logic: RSI pullback within trend
         if position is None:
-            if bullish_cross and rsi > 45 and rsi < 75 and adx > adx_threshold and vol_ok and vol_expanding:
+            if uptrend and strong_trend and long_pullback_ready and rsi > rsi_recover_low and rsi < 70:
                 position = "long"
                 entry_price = close
                 entry_idx = i
                 stop_price = close - atr_sl_mult * atr
                 tp_price = close + atr_tp_mult * atr
-            elif bearish_cross and rsi < 55 and rsi > 25 and adx > adx_threshold and vol_ok and vol_expanding:
+                best_price = close
+                long_pullback_ready = False
+
+            elif downtrend and strong_trend and short_pullback_ready and rsi < rsi_recover_high and rsi > 30:
                 position = "short"
                 entry_price = close
                 entry_idx = i
                 stop_price = close + atr_sl_mult * atr
                 tp_price = close - atr_tp_mult * atr
+                best_price = close
+                short_pullback_ready = False
 
     # Close open position at end
     if position is not None:
