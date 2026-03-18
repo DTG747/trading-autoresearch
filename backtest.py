@@ -104,20 +104,18 @@ def compute_metrics(trades, df):
 
 def run_strategy(df):
     """
-    EMA crossover + RSI filter strategy.
+    EMA crossover + RSI filter + ATR stop-loss strategy.
 
-    Rules:
-    - Long when EMA_fast crosses above EMA_slow AND RSI < 70
-    - Exit long when EMA_fast crosses below EMA_slow OR RSI > 80
-    - Short when EMA_fast crosses below EMA_slow AND RSI > 30
-    - Exit short when EMA_fast crosses above EMA_slow OR RSI < 20
-    - Fixed position size: $1000 per trade
-    - No overlapping positions
+    Changes from baseline:
+    - Added ATR-based stop-loss (1.5x ATR) to cut losers early
+    - Uses high/low prices for stop checks (realistic intra-bar stops)
     """
     # --- Parameters (agent: tune these) ---
     ema_fast_period = 12
     ema_slow_period = 26
     rsi_period = 14
+    atr_period = 14
+    atr_stop_multiplier = 1.5  # stop-loss at 1.5x ATR from entry
     rsi_long_entry = 70    # RSI must be below this to enter long
     rsi_long_exit = 80     # exit long if RSI above this
     rsi_short_entry = 30   # RSI must be above this to enter short
@@ -139,13 +137,21 @@ def run_strategy(df):
     df["rsi"] = 100.0 - (100.0 / (1.0 + rs))
     df["rsi"] = df["rsi"].fillna(50.0)
 
+    # ATR calculation
+    high_low = df["high"] - df["low"]
+    high_close = (df["high"] - df["close"].shift(1)).abs()
+    low_close = (df["low"] - df["close"].shift(1)).abs()
+    true_range = pd.concat([high_low, high_close, low_close], axis=1).max(axis=1)
+    df["atr"] = true_range.ewm(span=atr_period, adjust=False).mean()
+
     # --- Signal generation (no look-ahead) ---
     trades = []
     position = None  # None, 'long', or 'short'
     entry_idx = None
     entry_price = None
+    stop_price = None
 
-    warmup = max(ema_fast_period, ema_slow_period, rsi_period) + 1
+    warmup = max(ema_fast_period, ema_slow_period, rsi_period, atr_period) + 1
 
     for i in range(warmup, len(df)):
         ema_f = df["ema_fast"].iloc[i]
@@ -154,6 +160,9 @@ def run_strategy(df):
         ema_s_prev = df["ema_slow"].iloc[i - 1]
         rsi = df["rsi"].iloc[i]
         price = df["close"].iloc[i]
+        low = df["low"].iloc[i]
+        high = df["high"].iloc[i]
+        atr = df["atr"].iloc[i]
 
         cross_up = ema_f > ema_s and ema_f_prev <= ema_s_prev
         cross_down = ema_f < ema_s and ema_f_prev >= ema_s_prev
@@ -163,13 +172,33 @@ def run_strategy(df):
                 position = "long"
                 entry_idx = i
                 entry_price = price
+                stop_price = price - atr_stop_multiplier * atr
             elif cross_down and rsi > rsi_short_entry:
                 position = "short"
                 entry_idx = i
                 entry_price = price
+                stop_price = price + atr_stop_multiplier * atr
 
         elif position == "long":
-            if cross_down or rsi > rsi_long_exit:
+            # Check ATR stop-loss (use low to see if stop was hit intra-bar)
+            stopped_out = low <= stop_price
+            signal_exit = cross_down or rsi > rsi_long_exit
+
+            if stopped_out:
+                exit_price = stop_price  # assume filled at stop
+                trades.append({
+                    "entry_idx": entry_idx,
+                    "exit_idx": i,
+                    "entry_price": entry_price,
+                    "exit_price": exit_price,
+                    "direction": "long",
+                    "size": position_size,
+                })
+                position = None
+                entry_idx = None
+                entry_price = None
+                stop_price = None
+            elif signal_exit:
                 trades.append({
                     "entry_idx": entry_idx,
                     "exit_idx": i,
@@ -181,9 +210,28 @@ def run_strategy(df):
                 position = None
                 entry_idx = None
                 entry_price = None
+                stop_price = None
 
         elif position == "short":
-            if cross_up or rsi < rsi_short_exit:
+            # Check ATR stop-loss (use high to see if stop was hit intra-bar)
+            stopped_out = high >= stop_price
+            signal_exit = cross_up or rsi < rsi_short_exit
+
+            if stopped_out:
+                exit_price = stop_price  # assume filled at stop
+                trades.append({
+                    "entry_idx": entry_idx,
+                    "exit_idx": i,
+                    "entry_price": entry_price,
+                    "exit_price": exit_price,
+                    "direction": "short",
+                    "size": position_size,
+                })
+                position = None
+                entry_idx = None
+                entry_price = None
+                stop_price = None
+            elif signal_exit:
                 trades.append({
                     "entry_idx": entry_idx,
                     "exit_idx": i,
@@ -195,6 +243,7 @@ def run_strategy(df):
                 position = None
                 entry_idx = None
                 entry_price = None
+                stop_price = None
 
     # Close any open position at end
     if position is not None:
