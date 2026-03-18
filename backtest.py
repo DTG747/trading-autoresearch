@@ -148,7 +148,7 @@ def run_strategy(df):
     atr_trail_mult = 1.3   # trailing stop distance
     atr_trail_tight = 1.0  # tighter trail once trade is well in profit
     trail_tighten_threshold = 1.8  # tighten trail after price moves 1.8x ATR in favor
-    position_size = 284.0
+    position_size = 278.0
     max_hold_bars = 30      # max bars to hold a position
     breakeven_atr_mult = 0.52  # move stop to entry after price moves 0.52x ATR in favor
     vol_period = 20         # volume moving average period
@@ -292,7 +292,7 @@ def run_strategy(df):
             hit_tp = close >= tp_price
             time_exit = (i - entry_idx) >= max_hold_bars
             # Exit if trend reverses (EMA cross)
-            trend_exit = ema_f < ema_s and (i - entry_idx) >= 3
+            trend_exit = ema_f < ema_s and (i - entry_idx) >= 4
             if hit_stop or hit_tp or time_exit or trend_exit:
                 trades.append({
                     "entry_idx": entry_idx, "exit_idx": i,
