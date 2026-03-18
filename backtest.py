@@ -148,11 +148,11 @@ def run_strategy(df):
     atr_trail_mult = 1.3   # trailing stop distance
     atr_trail_tight = 0.9  # tighter trail once trade is well in profit
     trail_tighten_threshold = 1.8  # tighten trail after price moves 1.8x ATR in favor
-    position_size = 275.0
+    position_size = 248.0
     max_hold_bars = 30      # max bars to hold a position
-    breakeven_atr_mult = 1.0  # move stop to entry after price moves 1.0x ATR in favor
+    breakeven_atr_mult = 0.55  # move stop to entry after price moves 0.55x ATR in favor (faster BE)
     vol_period = 20         # volume moving average period
-    vol_mult = 0.6          # volume must be >= 0.6x average (allow more trades)
+    vol_mult = 0.5          # volume must be >= 0.5x average (allow more trades)
     # RSI thresholds for pullback detection
     rsi_pullback_low = 42
     rsi_recover_low = 46
@@ -225,11 +225,14 @@ def run_strategy(df):
     tp_price = None
     best_price = None
     current_size = position_size
-    warmup = slow_ema + 5
+    warmup = slow_ema + 20
 
     # Track RSI pullback state
     long_pullback_ready = False
     short_pullback_ready = False
+    last_trade_exit = -999
+    last_trade_won = True
+    cooldown_bars = 2  # bars to wait after a loss before re-entering
 
     for i in range(warmup, len(df) - 1):
         close = df["close"].iloc[i]
@@ -296,6 +299,8 @@ def run_strategy(df):
                     "entry_price": entry_price, "exit_price": close,
                     "direction": "long", "size": current_size,
                 })
+                last_trade_won = close > entry_price
+                last_trade_exit = i
                 position = None
 
         elif position == "short":
@@ -326,16 +331,23 @@ def run_strategy(df):
                     "entry_price": entry_price, "exit_price": close,
                     "direction": "short", "size": current_size,
                 })
+                last_trade_won = close < entry_price
+                last_trade_exit = i
                 position = None
 
         # Entry logic: RSI pullback within trend + volatility expansion
         if position is None:
+            # Cooldown after a losing trade: wait before re-entering
+            in_cooldown = (not last_trade_won) and (i - last_trade_exit < cooldown_bars)
+
             # Dynamic position sizing: scale with ADX strength
             # ADX 25 -> 0.7x size, ADX 40+ -> 1.0x size
             adx_scale = min(1.0, 0.7 + 0.3 * (adx - adx_threshold) / 15.0) if adx > adx_threshold else 0.7
-            trade_size = position_size * adx_scale
+            # Reduce size after a loss to limit consecutive-loss drawdown
+            loss_scale = 0.7 if not last_trade_won and (i - last_trade_exit < 10) else 1.0
+            trade_size = position_size * adx_scale * loss_scale
 
-            if uptrend and strong_trend and volume_confirmed and long_pullback_ready and rsi > rsi_recover_low and rsi < 70:
+            if not in_cooldown and uptrend and strong_trend and volume_confirmed and long_pullback_ready and rsi > rsi_recover_low and rsi < 70:
                 position = "long"
                 entry_price = close
                 entry_idx = i
@@ -345,7 +357,7 @@ def run_strategy(df):
                 long_pullback_ready = False
                 current_size = trade_size
 
-            elif downtrend and strong_trend and volume_confirmed and short_pullback_ready and rsi < rsi_recover_high and rsi > 30:
+            elif not in_cooldown and downtrend and strong_trend and volume_confirmed and short_pullback_ready and rsi < rsi_recover_high and rsi > 30:
                 position = "short"
                 entry_price = close
                 entry_idx = i
