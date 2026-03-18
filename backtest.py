@@ -148,7 +148,7 @@ def run_strategy(df):
     atr_trail_mult = 1.3   # trailing stop distance
     atr_trail_tight = 1.0  # tighter trail once trade is well in profit
     trail_tighten_threshold = 1.8  # tighten trail after price moves 1.8x ATR in favor
-    position_size = 271.0
+    position_size = 218.0
     max_hold_bars = 30      # max bars to hold a position
     breakeven_atr_mult = 0.52  # move stop to entry after price moves 0.52x ATR in favor
     vol_period = 20         # volume moving average period
@@ -295,12 +295,19 @@ def run_strategy(df):
             # Exit if trend reverses (EMA cross)
             trend_exit = ema_f < ema_s and (i - entry_idx) >= 4
             if hit_stop or hit_tp or time_exit or trend_exit:
+                # Use stop/tp price when those levels trigger (stop order fills)
+                if hit_stop:
+                    exit_px = stop_price
+                elif hit_tp:
+                    exit_px = tp_price
+                else:
+                    exit_px = close
                 trades.append({
                     "entry_idx": entry_idx, "exit_idx": i,
-                    "entry_price": entry_price, "exit_price": close,
+                    "entry_price": entry_price, "exit_price": exit_px,
                     "direction": "long", "size": current_size,
                 })
-                last_trade_won = close > entry_price
+                last_trade_won = exit_px > entry_price
                 if last_trade_won:
                     consecutive_losses = 0
                 else:
@@ -331,12 +338,19 @@ def run_strategy(df):
             # Exit if trend reverses (EMA cross)
             trend_exit = ema_f > ema_s and (i - entry_idx) >= 3
             if hit_stop or hit_tp or time_exit or trend_exit:
+                # Use stop/tp price when those levels trigger (stop order fills)
+                if hit_stop:
+                    exit_px = stop_price
+                elif hit_tp:
+                    exit_px = tp_price
+                else:
+                    exit_px = close
                 trades.append({
                     "entry_idx": entry_idx, "exit_idx": i,
-                    "entry_price": entry_price, "exit_price": close,
+                    "entry_price": entry_price, "exit_price": exit_px,
                     "direction": "short", "size": current_size,
                 })
-                last_trade_won = close < entry_price
+                last_trade_won = exit_px < entry_price
                 if last_trade_won:
                     consecutive_losses = 0
                 else:
