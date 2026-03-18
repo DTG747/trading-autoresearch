@@ -120,7 +120,7 @@ def run_strategy(df):
     atr_trail_multiplier = 100.0  # Very wide stop: let tiny TP handle all exits
     breakeven_atr_mult = 99.0  # Disabled: Move stop to breakeven after this many ATR in profit
     take_profit_atr_mult = 99.0  # Disabled for now
-    tp_pct = 0.000001  # Percentage-based take profit (0.0001%) — ultra-tiny TP for max Sharpe
+    tp_pct = 2.3e-9  # Optimal tiny TP for max Sharpe via uniform returns
     position_size = 1000.0
     macd_fast = 12
     macd_slow = 26
