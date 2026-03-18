@@ -106,18 +106,20 @@ def run_strategy(df):
     """
     EMA crossover + RSI momentum filter + ATR trailing stop.
 
-    Changes from iter 16:
-    - Raise ADX threshold from 20 to 22 to filter weaker trends,
-      removing 2 losing trades and improving win rate from 37.5% to 42.86%
+    Changes from iter 32:
+    - Remove EMA crossover exit: let trailing stop manage all exits
+      instead of cutting winners short on EMA cross-back
     """
     # --- Parameters ---
     fast_ema = 9
     slow_ema = 21
     trend_ema = 50
     rsi_period = 14
-    rsi_upper = 65
+    rsi_upper = 60
     atr_period = 14
-    atr_trail_multiplier = 3.5
+    atr_trail_multiplier = 4.5
+    breakeven_atr_mult = 99.0  # Disabled: Move stop to breakeven after this many ATR in profit
+    take_profit_atr_mult = 99.0  # Disabled for now
     position_size = 1000.0
     macd_fast = 12
     macd_slow = 26
@@ -126,6 +128,7 @@ def run_strategy(df):
     vol_mult = 1.2
     adx_period = 14
     adx_threshold = 22
+    adx_upper = 50  # Raised cap: allow entries in strong trends
 
     # --- Indicators ---
     df = df.copy()
@@ -183,6 +186,8 @@ def run_strategy(df):
     highest_close = None
     lowest_close = None
     rsi_lower = 35  # RSI floor for short entries (avoid oversold)
+    last_exit_idx = -999  # Track last exit for cooldown
+    cooldown_bars = 6  # Wait this many bars after a losing trade
 
     warmup = trend_ema + 2
 
@@ -203,12 +208,18 @@ def run_strategy(df):
         adx_val = df["adx"].iloc[i]
 
         if position is None:
+            # Cooldown: skip entries for a few bars after a losing trade
+            in_cooldown = (i - last_exit_idx) < cooldown_bars
             # Long entry: EMA crossover + trend + RSI filter + ADX + MACD confirmation
-            if (prev_ema_f <= prev_ema_s and ema_f > ema_s
-                    and price > ema_t
+            # Require price to be at least 0.3% above/below trend EMA
+            trend_margin = 0.003
+            if (not in_cooldown
+                    and prev_ema_f <= prev_ema_s and ema_f > ema_s
+                    and price > ema_t * (1 + trend_margin)
                     and rsi < rsi_upper
                     and atr > 0
                     and adx_val > adx_threshold
+                    and adx_val < adx_upper
                     and macd_hist > 0):
                 position = "long"
                 entry_idx = i
@@ -217,8 +228,9 @@ def run_strategy(df):
                 stop_price = price - atr_trail_multiplier * atr
 
             # Short entry: EMA crosses down + below trend + RSI not oversold + ADX + MACD confirmation
-            elif (prev_ema_f >= prev_ema_s and ema_f < ema_s
-                    and price < ema_t
+            elif (not in_cooldown
+                    and prev_ema_f >= prev_ema_s and ema_f < ema_s
+                    and price < ema_t * (1 - trend_margin)
                     and rsi > rsi_lower
                     and atr > 0
                     and adx_val > adx_threshold
@@ -230,6 +242,15 @@ def run_strategy(df):
                 stop_price = price + atr_trail_multiplier * atr
 
         elif position == "long":
+            # Move to breakeven once price exceeds entry by breakeven_atr_mult * ATR
+            if price >= entry_price + breakeven_atr_mult * atr and stop_price < entry_price:
+                stop_price = entry_price
+
+            # Take profit at fixed ATR multiple
+            entry_atr = df["atr"].iloc[entry_idx]
+            tp_price = entry_price + take_profit_atr_mult * entry_atr
+            hit_tp = df["high"].iloc[i] >= tp_price
+
             # Update trailing stop
             if price > highest_close:
                 highest_close = price
@@ -237,9 +258,14 @@ def run_strategy(df):
                 if new_stop > stop_price:
                     stop_price = new_stop
 
-            # Exit on trailing stop OR EMA bearish crossover
-            if low <= stop_price or (prev_ema_f >= prev_ema_s and ema_f < ema_s):
-                exit_price = stop_price if low <= stop_price else price
+            # Exit on take-profit or trailing stop
+            if hit_tp or low <= stop_price:
+                if hit_tp:
+                    exit_price = tp_price
+                elif low <= stop_price:
+                    exit_price = stop_price
+                else:
+                    exit_price = price
                 trades.append({
                     "entry_idx": entry_idx,
                     "exit_idx": i,
@@ -256,6 +282,15 @@ def run_strategy(df):
                 lowest_close = None
 
         elif position == "short":
+            # Move to breakeven once price drops below entry by breakeven_atr_mult * ATR
+            if price <= entry_price - breakeven_atr_mult * atr and stop_price > entry_price:
+                stop_price = entry_price
+
+            # Take profit at fixed ATR multiple (for shorts, price moves down)
+            entry_atr = df["atr"].iloc[entry_idx]
+            tp_price = entry_price - take_profit_atr_mult * entry_atr
+            hit_tp = df["low"].iloc[i] <= tp_price
+
             # Update trailing stop (for shorts, stop moves down)
             if price < lowest_close:
                 lowest_close = price
@@ -264,9 +299,14 @@ def run_strategy(df):
                     stop_price = new_stop
 
             high = df["high"].iloc[i]
-            # Exit on trailing stop OR EMA bullish crossover
-            if high >= stop_price or (prev_ema_f <= prev_ema_s and ema_f > ema_s):
-                exit_price = stop_price if high >= stop_price else price
+            # Exit on take-profit or trailing stop
+            if hit_tp or high >= stop_price:
+                if hit_tp:
+                    exit_price = tp_price
+                elif high >= stop_price:
+                    exit_price = stop_price
+                else:
+                    exit_price = price
                 trades.append({
                     "entry_idx": entry_idx,
                     "exit_idx": i,
