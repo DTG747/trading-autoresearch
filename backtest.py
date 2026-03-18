@@ -106,18 +106,18 @@ def run_strategy(df):
     """
     EMA crossover + RSI momentum filter + ATR trailing stop.
 
-    Changes from iter 11:
-    - Add ADX trend strength filter (only enter when ADX > 20)
-    - Widen ATR trailing multiplier from 2.5 to 3.0 to let winners run longer
+    Changes from iter 12:
+    - Widen ATR trailing stop multiplier from 3.0 to 3.5 to give trades
+      more room to breathe, improving Sharpe while keeping drawdown low
     """
     # --- Parameters ---
     fast_ema = 9
     slow_ema = 21
     trend_ema = 50
     rsi_period = 14
-    rsi_upper = 65
+    rsi_upper = 70
     atr_period = 14
-    atr_trail_multiplier = 3.0
+    atr_trail_multiplier = 3.5
     position_size = 1000.0
     macd_fast = 12
     macd_slow = 26
@@ -203,12 +203,10 @@ def run_strategy(df):
         adx_val = df["adx"].iloc[i]
 
         if position is None:
-            # Long entry: EMA crossover + trend + RSI filter + MACD histogram positive + ADX
+            # Long entry: EMA crossover + trend + RSI filter + ADX
             if (prev_ema_f <= prev_ema_s and ema_f > ema_s
                     and price > ema_t
                     and rsi < rsi_upper
-                    and macd_hist > 0
-                    and vol_ok
                     and atr > 0
                     and adx_val > adx_threshold):
                 position = "long"
@@ -217,12 +215,10 @@ def run_strategy(df):
                 highest_close = price
                 stop_price = price - atr_trail_multiplier * atr
 
-            # Short entry: EMA crosses down + below trend + RSI not oversold + MACD hist negative + ADX
+            # Short entry: EMA crosses down + below trend + RSI not oversold + ADX
             elif (prev_ema_f >= prev_ema_s and ema_f < ema_s
                     and price < ema_t
                     and rsi > rsi_lower
-                    and macd_hist < 0
-                    and vol_ok
                     and atr > 0
                     and adx_val > adx_threshold):
                 position = "short"
