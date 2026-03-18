@@ -125,12 +125,13 @@ def compute_metrics(trades, df):
 
 def run_strategy(df):
     """
-    EMA 20/50 crossover + ADX trend filter + ATR-based stops and take-profit.
+    EMA 20/50 crossover + ADX trend filter + ATR trailing stop.
 
     Improvements over baseline:
       - Wider EMAs (20/50) to reduce whipsaw in choppy markets
       - ADX filter: only enter when ADX > 20 (confirmed trend)
-      - ATR-based stop loss (1.5x ATR) and take profit (3x ATR)
+      - ATR-based initial stop loss (1.5x ATR)
+      - Trailing stop: after price moves 1.5x ATR favorably, trail stop at 1.5x ATR from best price
       - RSI extreme filter: avoid buying overbought / selling oversold
     """
     # --- Parameters ---
@@ -196,6 +197,20 @@ def run_strategy(df):
     dx = (abs(plus_di - minus_di) / (plus_di + minus_di).replace(0, np.nan) * 100).fillna(0)
     df["adx"] = dx.ewm(span=adx_period, adjust=False).mean()
 
+    # --- Volume filter ---
+    vol_ma_period = 20
+    df["vol_ma"] = df["volume"].rolling(window=vol_ma_period).mean()
+
+    # --- Bollinger Band for regime filter ---
+    bb_period = 20
+    bb_std = 2.0
+    df["bb_ma"] = df["close"].rolling(window=bb_period).mean()
+    df["bb_std"] = df["close"].rolling(window=bb_period).std()
+    df["bb_upper"] = df["bb_ma"] + bb_std * df["bb_std"]
+    df["bb_lower"] = df["bb_ma"] - bb_std * df["bb_std"]
+    df["bb_width"] = (df["bb_upper"] - df["bb_lower"]) / df["bb_ma"]
+    df["bb_width_ma"] = df["bb_width"].rolling(window=20).mean()
+
     # --- Trade loop ---
     trades = []
     position = None
@@ -212,9 +227,19 @@ def run_strategy(df):
         rsi = df["rsi"].iloc[i]
         atr = df["atr"].iloc[i]
         adx = df["adx"].iloc[i]
+        vol = df["volume"].iloc[i]
+        vol_ma = df["vol_ma"].iloc[i]
+        bb_width = df["bb_width"].iloc[i]
+        bb_width_ma = df["bb_width_ma"].iloc[i]
 
         bullish_cross = (cross == 1) and (cross_prev == -1)
         bearish_cross = (cross == -1) and (cross_prev == 1)
+
+        # Volume confirmation: entry volume should be above average
+        vol_ok = vol > vol_ma * 0.8
+
+        # Volatility filter: only trade when BB width is expanding (trending, not choppy)
+        vol_expanding = bb_width > bb_width_ma * 0.9 if not np.isnan(bb_width_ma) else True
 
         # Exit logic
         if position == "long":
@@ -239,15 +264,15 @@ def run_strategy(df):
                 })
                 position = None
 
-        # Entry logic
+        # Entry logic — added BB width filter to avoid choppy markets
         if position is None:
-            if bullish_cross and rsi > 45 and rsi < 75 and adx > adx_threshold:
+            if bullish_cross and rsi > 45 and rsi < 75 and adx > adx_threshold and vol_ok and vol_expanding:
                 position = "long"
                 entry_price = close
                 entry_idx = i
                 stop_price = close - atr_sl_mult * atr
                 tp_price = close + atr_tp_mult * atr
-            elif bearish_cross and rsi < 55 and rsi > 25 and adx > adx_threshold:
+            elif bearish_cross and rsi < 55 and rsi > 25 and adx > adx_threshold and vol_ok and vol_expanding:
                 position = "short"
                 entry_price = close
                 entry_idx = i
