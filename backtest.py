@@ -146,6 +146,8 @@ def run_strategy(df):
     atr_sl_mult = 1.7      # stop loss = 1.7x ATR
     atr_tp_mult = 4.0      # take profit = 4x ATR
     atr_trail_mult = 1.4   # trailing stop distance
+    atr_trail_tight = 1.0  # tighter trail once trade is well in profit
+    trail_tighten_threshold = 2.0  # tighten trail after price moves 2x ATR in favor
     position_size = 1000.0
     max_hold_bars = 25      # max bars to hold a position
     breakeven_atr_mult = 1.2  # move stop to entry after price moves 1.2x ATR in favor
@@ -261,7 +263,11 @@ def run_strategy(df):
         if position == "long":
             if close > best_price:
                 best_price = close
-                trail_stop = best_price - atr_trail_mult * atr
+                # Use tighter trail once trade is well in profit
+                if best_price >= entry_price + trail_tighten_threshold * atr:
+                    trail_stop = best_price - atr_trail_tight * atr
+                else:
+                    trail_stop = best_price - atr_trail_mult * atr
                 if trail_stop > stop_price:
                     stop_price = trail_stop
 
@@ -287,7 +293,11 @@ def run_strategy(df):
         elif position == "short":
             if close < best_price:
                 best_price = close
-                trail_stop = best_price + atr_trail_mult * atr
+                # Use tighter trail once trade is well in profit
+                if best_price <= entry_price - trail_tighten_threshold * atr:
+                    trail_stop = best_price + atr_trail_tight * atr
+                else:
+                    trail_stop = best_price + atr_trail_mult * atr
                 if trail_stop < stop_price:
                     stop_price = trail_stop
 
