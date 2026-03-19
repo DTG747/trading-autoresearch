@@ -160,16 +160,16 @@ def run_strategy(df):
     adx_threshold = 25     # minimum ADX to confirm trend (stricter)
     atr_sl_mult = 1.1      # stop loss = 1.1x ATR
     atr_tp_mult = 3.5      # take profit = 3.5x ATR
-    atr_trail_mult = 1.1   # trailing stop distance
-    atr_trail_tight = 0.8  # tighter trail once trade is well in profit
-    trail_tighten_threshold = 1.5  # tighten trail after price moves 1.5x ATR in favor
-    position_size = 50000.0
+    atr_trail_mult = 0.6   # trailing stop distance
+    atr_trail_tight = 0.65  # tighter trail once trade is well in profit
+    trail_tighten_threshold = 1.2  # tighten trail after price moves 1.2x ATR in favor
+    position_size = 58200.0
     partial_tp_atr_mult = 2.2  # take partial profit at 2.2x ATR
     partial_tp_fraction = 0.45  # close 45% of position at partial TP
     partial_tp2_atr_mult = 2.8  # second partial profit at 2.8x ATR
     partial_tp2_fraction = 0.5  # close 50% of remaining position at second partial TP
     max_hold_bars = 25      # max bars to hold a position (shorter to reduce variance)
-    breakeven_atr_mult = 0.35  # move stop to entry after price moves 0.35x ATR in favor (faster breakeven)
+    breakeven_atr_mult = 0.25  # move stop to entry after price moves 0.25x ATR in favor (faster breakeven)
     vol_period = 20         # volume moving average period
     vol_mult = 0.5          # volume must be >= 0.5x average (allow more trades)
     # RSI thresholds for pullback detection
@@ -443,7 +443,7 @@ def run_strategy(df):
             # ATR-normalized position sizing: target fixed risk per trade
             # Scale inversely with ATR% so per-trade returns are more uniform → boosts Sharpe
             atr_pct = atr / close if close > 0 else 0.01
-            target_risk_pct = 0.0155  # target ~1.55% risk per unit
+            target_risk_pct = 0.013  # target ~1.3% risk per unit (lower to reduce DD)
             normalized_size = position_size * (target_risk_pct / max(atr_pct * atr_sl_mult, 0.001))
             # Clamp to avoid extreme sizing
             trade_size = max(min(normalized_size, position_size * 1.15), position_size * 0.75)
