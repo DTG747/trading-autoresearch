@@ -159,15 +159,17 @@ def run_strategy(df):
     adx_period = 14
     adx_threshold = 25     # minimum ADX to confirm trend (stricter)
     atr_sl_mult = 1.1      # stop loss = 1.1x ATR
-    atr_tp_mult = 3.5      # take profit = 3.5x ATR (tighter to capture more consistently)
-    atr_trail_mult = 1.1   # trailing stop distance (tighter for more consistent exits)
+    atr_tp_mult = 3.5      # take profit = 3.5x ATR
+    atr_trail_mult = 1.1   # trailing stop distance
     atr_trail_tight = 0.8  # tighter trail once trade is well in profit
     trail_tighten_threshold = 1.5  # tighten trail after price moves 1.5x ATR in favor
     position_size = 24000.0
     partial_tp_atr_mult = 2.2  # take partial profit at 2.2x ATR
-    partial_tp_fraction = 0.4  # close 40% of position at partial TP
-    max_hold_bars = 30      # max bars to hold a position
-    breakeven_atr_mult = 0.52  # move stop to entry after price moves 0.52x ATR in favor
+    partial_tp_fraction = 0.45  # close 45% of position at partial TP
+    partial_tp2_atr_mult = 2.8  # second partial profit at 2.8x ATR
+    partial_tp2_fraction = 0.5  # close 50% of remaining position at second partial TP
+    max_hold_bars = 25      # max bars to hold a position (shorter to reduce variance)
+    breakeven_atr_mult = 0.35  # move stop to entry after price moves 0.35x ATR in favor (faster breakeven)
     vol_period = 20         # volume moving average period
     vol_mult = 0.5          # volume must be >= 0.5x average (allow more trades)
     # RSI thresholds for pullback detection
@@ -243,6 +245,7 @@ def run_strategy(df):
     best_price = None
     current_size = position_size
     partial_taken = False
+    partial2_taken = False
     warmup = slow_ema + 20
 
     # Track RSI pullback state
@@ -319,6 +322,18 @@ def run_strategy(df):
                 current_size -= partial_size
                 partial_taken = True
 
+            # Second partial profit-taking at higher level
+            partial_tp2_price = entry_price + partial_tp2_atr_mult * atr
+            if partial_taken and not partial2_taken and close >= partial_tp2_price:
+                partial2_size = current_size * partial_tp2_fraction
+                trades.append({
+                    "entry_idx": entry_idx, "exit_idx": i,
+                    "entry_price": entry_price, "exit_price": close,
+                    "direction": "long", "size": partial2_size,
+                })
+                current_size -= partial2_size
+                partial2_taken = True
+
             hit_stop = close <= stop_price
             hit_tp = close >= tp_price
             time_exit = (i - entry_idx) >= max_hold_bars
@@ -347,6 +362,7 @@ def run_strategy(df):
                 last_trade_exit = i
                 position = None
                 partial_taken = False
+                partial2_taken = False
 
         elif position == "short":
             if close < best_price:
@@ -377,6 +393,18 @@ def run_strategy(df):
                 current_size -= partial_size
                 partial_taken = True
 
+            # Second partial profit-taking at higher level
+            partial_tp2_price = entry_price - partial_tp2_atr_mult * atr
+            if partial_taken and not partial2_taken and close <= partial_tp2_price:
+                partial2_size = current_size * partial_tp2_fraction
+                trades.append({
+                    "entry_idx": entry_idx, "exit_idx": i,
+                    "entry_price": entry_price, "exit_price": close,
+                    "direction": "short", "size": partial2_size,
+                })
+                current_size -= partial2_size
+                partial2_taken = True
+
             hit_stop = close >= stop_price
             hit_tp = close <= tp_price
             time_exit = (i - entry_idx) >= max_hold_bars
@@ -405,6 +433,7 @@ def run_strategy(df):
                 last_trade_exit = i
                 position = None
                 partial_taken = False
+                partial2_taken = False
 
         # Entry logic: RSI pullback within trend + volatility expansion
         if position is None:
