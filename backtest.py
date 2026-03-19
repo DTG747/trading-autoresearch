@@ -411,8 +411,13 @@ def run_strategy(df):
             # Cooldown after a losing trade: wait before re-entering
             in_cooldown = (not last_trade_won) and (i - last_trade_exit < cooldown_bars)
 
-            # Fixed position sizing for more uniform returns (boosts Sharpe)
-            trade_size = position_size
+            # ATR-normalized position sizing: target fixed risk per trade
+            # Scale inversely with ATR% so per-trade returns are more uniform → boosts Sharpe
+            atr_pct = atr / close if close > 0 else 0.01
+            target_risk_pct = 0.0155  # target ~1.55% risk per unit
+            normalized_size = position_size * (target_risk_pct / max(atr_pct * atr_sl_mult, 0.001))
+            # Clamp to avoid extreme sizing
+            trade_size = max(min(normalized_size, position_size * 1.35), position_size * 0.5)
 
             if not in_cooldown and uptrend and strong_trend and volume_confirmed and long_pullback_ready and rsi > rsi_recover_low and rsi < 70:
                 position = "long"
