@@ -173,11 +173,9 @@ def run_strategy(df):
     """
     Phase 4 long-only trend-following: EMA crossover + RSI pullback.
 
-    Key change (iter 3): Go long-only. BTC has structural upward bias;
-    short trades were destroying holdout performance (30% WR on holdout).
-    Removing shorts should improve generalization significantly.
-    Also add a second entry signal: EMA crossover itself (not just pullback)
-    to catch more trend starts.
+    Iter 6: Tighter trailing stop (2.5→1.8 ATR), volume confirmation filter,
+    earlier trend-reversal exit (no 5-bar minimum), and reduced risk per trade.
+    Goal: reduce holdout drawdown (9.22% → ~5%) which is the biggest score drag.
     """
     # --- Parameters ---
     fast_ema = 21
@@ -187,10 +185,10 @@ def run_strategy(df):
     adx_period = 14
     adx_threshold = 15          # low threshold to catch more trends
     atr_sl_mult = 2.0           # stop loss at 2.0x ATR
-    atr_tp_mult = 4.0           # take profit at 4.0x ATR — let winners run more
-    atr_trail_mult = 2.5        # trailing stop at 2.5x ATR
-    risk_per_trade = 200.0      # risk $200 per trade (2% of 10k capital)
-    max_hold_bars = 35          # hold up to 35 bars
+    atr_tp_mult = 4.0           # take profit at 4.0x ATR
+    atr_trail_mult = 1.8        # tighter trailing stop (was 2.5) to lock in profits
+    risk_per_trade = 150.0      # reduced from 200 to limit DD impact
+    max_hold_bars = 30          # slightly shorter max hold (was 35)
     cooldown_bars = 1           # minimal cooldown
 
     # RSI pullback thresholds
@@ -198,6 +196,8 @@ def run_strategy(df):
     rsi_recover_low = 50        # recover above 50 to enter long
 
     max_pullback_age = 15       # pullback signal valid for 15 bars
+
+    vol_avg_period = 20         # volume moving average period
 
     # --- Indicators ---
     df = df.copy()
@@ -237,6 +237,9 @@ def run_strategy(df):
     dx = 100 * ((plus_di - minus_di).abs() / (plus_di + minus_di).replace(0, np.nan))
     df["adx"] = dx.ewm(span=adx_period, adjust=False).mean().fillna(0)
 
+    # Volume moving average for confirmation
+    df["vol_ma"] = df["volume"].rolling(window=vol_avg_period, min_periods=1).mean()
+
     # --- Trade loop ---
     trades = []
     position = None
@@ -264,6 +267,8 @@ def run_strategy(df):
         ema_f = df["ema_fast"].iloc[i]
         ema_s = df["ema_slow"].iloc[i]
         adx = df["adx"].iloc[i]
+        vol = df["volume"].iloc[i]
+        vol_ma = df["vol_ma"].iloc[i]
 
         uptrend = ema_f > ema_s
         strong_trend = adx > adx_threshold
@@ -301,7 +306,8 @@ def run_strategy(df):
             hit_stop = close <= stop_price
             hit_tp = close >= tp_price
             time_exit = (i - entry_idx) >= max_hold_bars
-            trend_exit = ema_f < ema_s and (i - entry_idx) >= 5
+            # Trend reversal exit — no minimum hold delay (was 5 bars)
+            trend_exit = ema_f < ema_s
 
             if hit_stop or hit_tp or time_exit or trend_exit:
                 if hit_stop:
@@ -328,15 +334,18 @@ def run_strategy(df):
             ema_dist_pct = abs(close - ema_s) / ema_s * 100.0 if ema_s > 0 else 0
             not_overextended = ema_dist_pct < 15.0
 
+            # Volume confirmation: require volume at least 70% of average
+            vol_ok = vol >= vol_ma * 0.7
+
             # Signal 1: RSI pullback recovery in uptrend (original)
             pullback_signal = (uptrend and strong_trend and long_pullback_ready
                                and rsi > rsi_recover_low and rsi < 70
-                               and not_overextended)
+                               and not_overextended and vol_ok)
 
             # Signal 2: Fresh EMA crossover (catch trend starts)
             cross_signal = (fresh_cross and strong_trend
                             and rsi > 40 and rsi < 70
-                            and not_overextended)
+                            and not_overextended and vol_ok)
 
             if pullback_signal or cross_signal:
                 # ATR-based position sizing: risk fixed $ per trade
