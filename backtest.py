@@ -171,29 +171,34 @@ def compute_metrics(trades, df):
 
 def run_strategy(df):
     """
-    Phase 4 long-only trend-following: EMA crossover + RSI pullback + EMA bounce.
+    Phase 4 long+short trend-following: EMA crossover + RSI pullback + EMA bounce.
 
-    Iter 10: Remove fixed TP — let winners run via trailing stop + trend exit.
-    Tighten trailing stop from 1.8 to 1.5 ATR to lock profits. Increase max hold
-    from 40 to 60 bars to give trends more room. This should significantly boost
-    total return while maintaining realistic drawdown.
+    Iter 13: Add ROC (rate of change) momentum confirmation filter to improve
+    trade quality. Reduce short-side risk and tighten short entry requirements
+    to improve holdout win rate. Add consecutive loss position sizing reduction
+    to limit drawdown.
     """
     # --- Parameters ---
     fast_ema = 21
     slow_ema = 45
+    slow_ema2 = 80  # Higher timeframe trend filter
     rsi_period = 14
     atr_period = 14
     adx_period = 14
     adx_threshold = 15
-    atr_sl_mult = 2.0
-    atr_trail_mult = 1.5
-    risk_per_trade = 180.0
+    atr_sl_mult = 2.2
+    atr_trail_mult = 1.8
+    risk_per_trade = 310.0
     max_hold_bars = 60
     cooldown_bars = 1
 
-    # RSI pullback thresholds
+    # RSI pullback thresholds (long)
     rsi_pullback_low = 46
     rsi_recover_low = 48
+
+    # RSI pullback thresholds (short — mirror)
+    rsi_pullback_high = 54
+    rsi_recover_high = 52
 
     max_pullback_age = 15
 
@@ -203,10 +208,29 @@ def run_strategy(df):
     ema_bounce_pct = 1.5
 
     # Breakeven stop: move stop to entry once trade is up by this many ATRs
-    breakeven_atr_trigger = 1.2
+    breakeven_atr_trigger = 1.0
+    # Tighten trailing stop once trade is well in profit
+    profit_accel_trigger = 2.5  # ATRs of profit to trigger tighter trail
+    accel_trail_mult = 1.0  # Tighter trailing once in big profit
 
-    # Momentum breakout: lookback for new high
+    # Momentum breakout: lookback for new high/low
     breakout_lookback = 20
+
+    # ROC momentum confirmation
+    roc_period = 10  # 10-bar rate of change
+    roc_long_min = 0.0  # Price must be rising for longs
+    roc_short_max = 0.0  # Price must be falling for shorts
+
+    # Short-side risk is smaller (BTC has upward bias)
+    short_risk_per_trade = 60.0  # Reduced further to limit short-side losses
+    short_atr_sl_mult = 2.4
+    short_atr_trail_mult = 1.9
+    short_max_hold_bars = 25  # Shorter hold for shorts
+    short_adx_threshold = 22  # Require stronger trend for shorts
+
+    # Consecutive loss sizing reduction
+    max_consec_losses = 3  # After N consecutive losses, reduce size
+    loss_size_mult = 0.5  # Trade at 50% size after streak
 
     # --- Indicators ---
     df = df.copy()
@@ -214,6 +238,7 @@ def run_strategy(df):
     # EMAs for trend
     df["ema_fast"] = df["close"].ewm(span=fast_ema, adjust=False).mean()
     df["ema_slow"] = df["close"].ewm(span=slow_ema, adjust=False).mean()
+    df["ema_slow2"] = df["close"].ewm(span=slow_ema2, adjust=False).mean()
 
     # RSI
     delta = df["close"].diff()
@@ -249,8 +274,12 @@ def run_strategy(df):
     # Volume moving average for confirmation
     df["vol_ma"] = df["volume"].rolling(window=vol_avg_period, min_periods=1).mean()
 
-    # Rolling high for breakout detection
+    # Rolling high/low for breakout detection
     df["high_roll"] = df["high"].rolling(window=breakout_lookback, min_periods=breakout_lookback).max()
+    df["low_roll"] = df["low"].rolling(window=breakout_lookback, min_periods=breakout_lookback).min()
+
+    # Rate of Change (momentum confirmation)
+    df["roc"] = df["close"].pct_change(periods=roc_period) * 100.0
 
     # --- Trade loop ---
     trades = []
@@ -267,7 +296,12 @@ def run_strategy(df):
     # RSI pullback tracking
     long_pullback_ready = False
     long_pullback_bar = 0
+    short_pullback_ready = False
+    short_pullback_bar = 0
     last_trade_exit = -999
+
+    # Consecutive loss tracking for position sizing
+    consec_losses = 0
 
     # Track EMA crossover for fresh cross entry signal
     prev_ema_f = None
@@ -282,19 +316,28 @@ def run_strategy(df):
         adx = df["adx"].iloc[i]
         vol = df["volume"].iloc[i]
         vol_ma = df["vol_ma"].iloc[i]
+        roc = df["roc"].iloc[i] if not np.isnan(df["roc"].iloc[i]) else 0.0
 
+        ema_s2 = df["ema_slow2"].iloc[i]
         uptrend = ema_f > ema_s
+        downtrend = ema_f < ema_s
         strong_trend = adx > adx_threshold
+        # Higher timeframe trend filter
+        macro_bullish = close > ema_s2
+        macro_bearish = close < ema_s2
 
-        # Detect fresh EMA crossover (fast crosses above slow)
-        fresh_cross = False
+        # Detect fresh EMA crossovers
+        fresh_cross_up = False
+        fresh_cross_down = False
         if prev_ema_f is not None and prev_ema_s is not None:
             if prev_ema_f <= prev_ema_s and ema_f > ema_s:
-                fresh_cross = True
+                fresh_cross_up = True
+            if prev_ema_f >= prev_ema_s and ema_f < ema_s:
+                fresh_cross_down = True
         prev_ema_f = ema_f
         prev_ema_s = ema_s
 
-        # Track RSI pullback states
+        # Track RSI pullback states (long)
         if rsi < rsi_pullback_low:
             long_pullback_ready = True
             long_pullback_bar = i
@@ -303,10 +346,17 @@ def run_strategy(df):
         if not uptrend:
             long_pullback_ready = False
 
+        # Track RSI pullback states (short — RSI bounces high then comes back down)
+        if rsi > rsi_pullback_high:
+            short_pullback_ready = True
+            short_pullback_bar = i
+        if short_pullback_ready and (i - short_pullback_bar) > max_pullback_age:
+            short_pullback_ready = False
+        if not downtrend:
+            short_pullback_ready = False
+
         # === EXIT LOGIC ===
         if position == "long":
-            # Breakeven stop: once trade is up by breakeven_atr_trigger * ATR,
-            # move stop to entry price to eliminate downside risk
             if not breakeven_activated and close >= entry_price + breakeven_atr_trigger * entry_atr:
                 breakeven_activated = True
                 if entry_price > stop_price:
@@ -314,7 +364,10 @@ def run_strategy(df):
 
             if close > best_price:
                 best_price = close
-                trail_stop = best_price - atr_trail_mult * atr
+                # Tighten trail once in significant profit
+                profit_atrs = (best_price - entry_price) / entry_atr if entry_atr > 0 else 0
+                curr_trail = accel_trail_mult if profit_atrs >= profit_accel_trigger else atr_trail_mult
+                trail_stop = best_price - curr_trail * atr
                 if trail_stop > stop_price:
                     stop_price = trail_stop
 
@@ -323,19 +376,56 @@ def run_strategy(df):
             trend_exit = ema_f < ema_s
 
             if hit_stop or time_exit or trend_exit:
-                if hit_stop:
-                    exit_px = stop_price
-                else:
-                    exit_px = close
+                exit_px = stop_price if hit_stop else close
                 trades.append({
                     "entry_idx": entry_idx, "exit_idx": i,
                     "entry_price": entry_price, "exit_price": exit_px,
                     "direction": "long", "size": position_size,
                 })
+                # Track consecutive losses for sizing
+                if exit_px < entry_price:
+                    consec_losses += 1
+                else:
+                    consec_losses = 0
                 last_trade_exit = i
                 position = None
 
-        # === ENTRY LOGIC (long only) ===
+        elif position == "short":
+            # Breakeven for shorts: price drops by breakeven_atr_trigger * ATR
+            if not breakeven_activated and close <= entry_price - breakeven_atr_trigger * entry_atr:
+                breakeven_activated = True
+                if entry_price < stop_price:
+                    stop_price = entry_price
+
+            if close < best_price:
+                best_price = close
+                # Tighten trail once in significant profit
+                profit_atrs = (entry_price - best_price) / entry_atr if entry_atr > 0 else 0
+                curr_trail = accel_trail_mult if profit_atrs >= profit_accel_trigger else short_atr_trail_mult
+                trail_stop = best_price + curr_trail * atr
+                if trail_stop < stop_price:
+                    stop_price = trail_stop
+
+            hit_stop = close >= stop_price
+            time_exit = (i - entry_idx) >= short_max_hold_bars
+            trend_exit = ema_f > ema_s
+
+            if hit_stop or time_exit or trend_exit:
+                exit_px = stop_price if hit_stop else close
+                trades.append({
+                    "entry_idx": entry_idx, "exit_idx": i,
+                    "entry_price": entry_price, "exit_price": exit_px,
+                    "direction": "short", "size": position_size,
+                })
+                # Track consecutive losses for sizing
+                if exit_px > entry_price:
+                    consec_losses += 1
+                else:
+                    consec_losses = 0
+                last_trade_exit = i
+                position = None
+
+        # === ENTRY LOGIC ===
         if position is None:
             if (i - last_trade_exit) < cooldown_bars:
                 continue
@@ -344,27 +434,36 @@ def run_strategy(df):
             not_overextended = ema_dist_pct < 15.0
             vol_ok = vol >= vol_ma * 0.7
 
-            # Signal 1: RSI pullback recovery in uptrend
-            pullback_signal = (uptrend and strong_trend and long_pullback_ready
-                               and rsi > rsi_recover_low and rsi < 70
-                               and not_overextended and vol_ok)
+            # Momentum confirmation via ROC
+            roc_long_ok = roc >= roc_long_min
+            roc_short_ok = roc <= roc_short_max
 
-            # Signal 2: Fresh EMA crossover (catch trend starts)
-            cross_signal = (fresh_cross and strong_trend
+            # Size multiplier for consecutive losses
+            size_mult = loss_size_mult if consec_losses >= max_consec_losses else 1.0
+
+            # ---- LONG SIGNALS ----
+            # Signal 1: RSI pullback recovery in uptrend
+            pullback_signal = (uptrend and strong_trend and macro_bullish
+                               and long_pullback_ready
+                               and rsi > rsi_recover_low and rsi < 70
+                               and not_overextended and vol_ok and roc_long_ok)
+
+            # Signal 2: Fresh EMA crossover up
+            cross_signal = (fresh_cross_up and strong_trend
                             and rsi > 40 and rsi < 70
                             and not_overextended and vol_ok)
 
             # Signal 3: EMA bounce — price pulls back near fast EMA in uptrend
             ema_f_dist_pct = (close - ema_f) / ema_f * 100.0 if ema_f > 0 else 999
-            bounce_signal = (uptrend and strong_trend
+            bounce_signal = (uptrend and strong_trend and macro_bullish
                              and 0 <= ema_f_dist_pct <= ema_bounce_pct
                              and rsi > 44 and rsi < 58
-                             and not_overextended and vol_ok
+                             and not_overextended and vol_ok and roc_long_ok
                              and (i - last_trade_exit) >= 4)
 
             # Signal 4: Momentum breakout — price makes new N-bar high in uptrend
             prev_high_roll = df["high_roll"].iloc[i - 1] if i > 0 else 0
-            breakout_signal = (uptrend and strong_trend
+            breakout_signal = (uptrend and strong_trend and macro_bullish
                                and close > prev_high_roll
                                and rsi > 50 and rsi < 72
                                and not_overextended and vol_ok
@@ -372,7 +471,7 @@ def run_strategy(df):
 
             if pullback_signal or cross_signal or bounce_signal or breakout_signal:
                 stop_dist = atr_sl_mult * atr
-                position_size = risk_per_trade / (stop_dist / close) if stop_dist > 0 else 0
+                position_size = risk_per_trade * size_mult / (stop_dist / close) if stop_dist > 0 else 0
                 if position_size <= 0:
                     continue
                 position = "long"
@@ -383,6 +482,50 @@ def run_strategy(df):
                 best_price = close
                 breakeven_activated = False
                 long_pullback_ready = False
+                continue
+
+            # ---- SHORT SIGNALS ----
+            short_strong_trend = adx > short_adx_threshold  # Higher bar for shorts
+            # Signal S1: RSI pullback recovery in downtrend (RSI was high, came back)
+            short_pullback_signal = (downtrend and short_strong_trend and macro_bearish
+                                     and short_pullback_ready
+                                     and rsi < rsi_recover_high and rsi > 30
+                                     and not_overextended and vol_ok and roc_short_ok)
+
+            # Signal S2: Fresh EMA crossover down
+            short_cross_signal = (fresh_cross_down and short_strong_trend and macro_bearish
+                                  and rsi < 60 and rsi > 30
+                                  and not_overextended and vol_ok and roc_short_ok)
+
+            # Signal S3: EMA bounce short — price rallies back near fast EMA in downtrend
+            ema_f_dist_short = (ema_f - close) / ema_f * 100.0 if ema_f > 0 else 999
+            short_bounce_signal = (downtrend and short_strong_trend and macro_bearish
+                                   and 0 <= ema_f_dist_short <= ema_bounce_pct
+                                   and rsi < 56 and rsi > 42
+                                   and not_overextended and vol_ok and roc_short_ok
+                                   and (i - last_trade_exit) >= 4)
+
+            # Signal S4: Breakdown — price makes new N-bar low in downtrend
+            prev_low_roll = df["low_roll"].iloc[i - 1] if i > 0 else float('inf')
+            short_breakout_signal = (downtrend and short_strong_trend and macro_bearish
+                                     and close < prev_low_roll
+                                     and rsi < 50 and rsi > 28
+                                     and not_overextended and vol_ok and roc_short_ok
+                                     and (i - last_trade_exit) >= 3)
+
+            if short_pullback_signal or short_cross_signal or short_bounce_signal or short_breakout_signal:
+                stop_dist = short_atr_sl_mult * atr
+                position_size = short_risk_per_trade * size_mult / (stop_dist / close) if stop_dist > 0 else 0
+                if position_size <= 0:
+                    continue
+                position = "short"
+                entry_price = close
+                entry_idx = i
+                entry_atr = atr
+                stop_price = close + stop_dist
+                best_price = close
+                breakeven_activated = False
+                short_pullback_ready = False
 
     # Close open position at end
     if position is not None:
