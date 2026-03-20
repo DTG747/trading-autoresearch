@@ -171,15 +171,13 @@ def compute_metrics(trades, df):
 
 def run_strategy(df):
     """
-    Phase 4 trend-following: EMA crossover + RSI pullback, wider stops, no partial TP.
+    Phase 4 long-only trend-following: EMA crossover + RSI pullback.
 
-    Key design for Phase 4 scoring:
-      - Looser filters → more trades (target 40-80 on train)
-      - Wider ATR stops (2.5x) → accept losses, realistic win rate ~50-60%
-      - Simple trailing stop (2.0x ATR) → let winners run
-      - No breakeven, no partial TP → avoid inflating win rate
-      - ADX threshold lowered to 18 → trade more conditions
-      - Max hold 40 bars → give trends time to develop
+    Key change (iter 3): Go long-only. BTC has structural upward bias;
+    short trades were destroying holdout performance (30% WR on holdout).
+    Removing shorts should improve generalization significantly.
+    Also add a second entry signal: EMA crossover itself (not just pullback)
+    to catch more trend starts.
     """
     # --- Parameters ---
     fast_ema = 21
@@ -187,19 +185,17 @@ def run_strategy(df):
     rsi_period = 14
     atr_period = 14
     adx_period = 14
-    adx_threshold = 15          # lower to catch more trends, especially in holdout
-    atr_sl_mult = 2.0           # tighter stop: 2.0x ATR (was 2.5x) to reduce DD
-    atr_tp_mult = 4.0           # take profit at 4x ATR (was 5x)
-    atr_trail_mult = 1.8        # trailing stop at 1.8x ATR
+    adx_threshold = 15          # low threshold to catch more trends
+    atr_sl_mult = 2.0           # stop loss at 2.0x ATR
+    atr_tp_mult = 4.0           # take profit at 4.0x ATR — let winners run more
+    atr_trail_mult = 2.5        # trailing stop at 2.5x ATR
     risk_per_trade = 200.0      # risk $200 per trade (2% of 10k capital)
-    max_hold_bars = 30          # slightly shorter hold (was 40)
-    cooldown_bars = 1           # shorter cooldown to allow more trades
+    max_hold_bars = 35          # hold up to 35 bars
+    cooldown_bars = 1           # minimal cooldown
 
-    # RSI pullback thresholds — widened further for more entries
+    # RSI pullback thresholds
     rsi_pullback_low = 48       # RSI dips below 48 in uptrend
     rsi_recover_low = 50        # recover above 50 to enter long
-    rsi_pullback_high = 52      # RSI rises above 52 in downtrend
-    rsi_recover_high = 50       # drop below 50 to enter short
 
     max_pullback_age = 15       # pullback signal valid for 15 bars
 
@@ -254,10 +250,12 @@ def run_strategy(df):
 
     # RSI pullback tracking
     long_pullback_ready = False
-    short_pullback_ready = False
     long_pullback_bar = 0
-    short_pullback_bar = 0
     last_trade_exit = -999
+
+    # Track EMA crossover for fresh cross entry signal
+    prev_ema_f = None
+    prev_ema_s = None
 
     for i in range(warmup, len(df) - 1):
         close = df["close"].iloc[i]
@@ -268,28 +266,28 @@ def run_strategy(df):
         adx = df["adx"].iloc[i]
 
         uptrend = ema_f > ema_s
-        downtrend = ema_f < ema_s
         strong_trend = adx > adx_threshold
+
+        # Detect fresh EMA crossover (fast crosses above slow)
+        fresh_cross = False
+        if prev_ema_f is not None and prev_ema_s is not None:
+            if prev_ema_f <= prev_ema_s and ema_f > ema_s:
+                fresh_cross = True
+        prev_ema_f = ema_f
+        prev_ema_s = ema_s
 
         # Track RSI pullback states
         if rsi < rsi_pullback_low:
             long_pullback_ready = True
             long_pullback_bar = i
-        if rsi > rsi_pullback_high:
-            short_pullback_ready = True
-            short_pullback_bar = i
 
         # Expire stale pullback signals
         if long_pullback_ready and (i - long_pullback_bar) > max_pullback_age:
             long_pullback_ready = False
-        if short_pullback_ready and (i - short_pullback_bar) > max_pullback_age:
-            short_pullback_ready = False
 
         # Reset pullback if trend reverses
         if not uptrend:
             long_pullback_ready = False
-        if not downtrend:
-            short_pullback_ready = False
 
         # === EXIT LOGIC ===
         if position == "long":
@@ -320,35 +318,7 @@ def run_strategy(df):
                 last_trade_exit = i
                 position = None
 
-        elif position == "short":
-            # Update trailing stop
-            if close < best_price:
-                best_price = close
-                trail_stop = best_price + atr_trail_mult * atr
-                if trail_stop < stop_price:
-                    stop_price = trail_stop
-
-            hit_stop = close >= stop_price
-            hit_tp = close <= tp_price
-            time_exit = (i - entry_idx) >= max_hold_bars
-            trend_exit = ema_f > ema_s and (i - entry_idx) >= 5
-
-            if hit_stop or hit_tp or time_exit or trend_exit:
-                if hit_stop:
-                    exit_px = stop_price
-                elif hit_tp:
-                    exit_px = tp_price
-                else:
-                    exit_px = close
-                trades.append({
-                    "entry_idx": entry_idx, "exit_idx": i,
-                    "entry_price": entry_price, "exit_price": exit_px,
-                    "direction": "short", "size": position_size,
-                })
-                last_trade_exit = i
-                position = None
-
-        # === ENTRY LOGIC ===
+        # === ENTRY LOGIC (long only) ===
         if position is None:
             # Simple cooldown: wait a few bars between trades
             if (i - last_trade_exit) < cooldown_bars:
@@ -358,9 +328,17 @@ def run_strategy(df):
             ema_dist_pct = abs(close - ema_s) / ema_s * 100.0 if ema_s > 0 else 0
             not_overextended = ema_dist_pct < 15.0
 
-            if (uptrend and strong_trend and long_pullback_ready
-                    and rsi > rsi_recover_low and rsi < 70
-                    and not_overextended):
+            # Signal 1: RSI pullback recovery in uptrend (original)
+            pullback_signal = (uptrend and strong_trend and long_pullback_ready
+                               and rsi > rsi_recover_low and rsi < 70
+                               and not_overextended)
+
+            # Signal 2: Fresh EMA crossover (catch trend starts)
+            cross_signal = (fresh_cross and strong_trend
+                            and rsi > 40 and rsi < 70
+                            and not_overextended)
+
+            if pullback_signal or cross_signal:
                 # ATR-based position sizing: risk fixed $ per trade
                 stop_dist = atr_sl_mult * atr
                 position_size = risk_per_trade / (stop_dist / close) if stop_dist > 0 else 0
@@ -373,22 +351,6 @@ def run_strategy(df):
                 tp_price = close + atr_tp_mult * atr
                 best_price = close
                 long_pullback_ready = False
-
-            elif (downtrend and strong_trend and short_pullback_ready
-                      and rsi < rsi_recover_high and rsi > 30
-                      and not_overextended):
-                # ATR-based position sizing: risk fixed $ per trade
-                stop_dist = atr_sl_mult * atr
-                position_size = risk_per_trade / (stop_dist / close) if stop_dist > 0 else 0
-                if position_size <= 0:
-                    continue
-                position = "short"
-                entry_price = close
-                entry_idx = i
-                stop_price = close + stop_dist
-                tp_price = close - atr_tp_mult * atr
-                best_price = close
-                short_pullback_ready = False
 
     # Close open position at end
     if position is not None:
