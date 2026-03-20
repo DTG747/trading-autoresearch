@@ -173,10 +173,9 @@ def run_strategy(df):
     """
     Phase 4 long+short trend-following: EMA crossover + RSI pullback + EMA bounce + BB squeeze.
 
-    Iter 23: Soften trend_exit — only force exit on EMA cross if trade is losing.
-    Profitable trades are managed by trailing stop + EMA floor, letting winners
-    run through temporary EMA crosses. Also raise RSI exit thresholds (78→82,
-    22→18) to avoid premature profit-taking.
+    Iter 47: Remove RSI profit-taking exits entirely — let trailing stop + EMA floor
+    manage exits. Tighten accelerated trail (1.2→1.0 ATR). Soften trend_exit to
+    require ≥5 bars in trade before forcing exit on losing EMA cross.
     """
     # --- Parameters ---
     fast_ema = 21
@@ -215,7 +214,7 @@ def run_strategy(df):
     breakeven_atr_trigger = 1.3
     # Tighten trailing stop once trade is well in profit
     profit_accel_trigger = 2.5  # ATRs of profit to trigger tighter trail
-    accel_trail_mult = 1.2  # Tighter trailing once in big profit
+    accel_trail_mult = 1.0  # Tighter trailing once in big profit
 
     # Momentum breakout: lookback for new high/low
     breakout_lookback = 20
@@ -406,13 +405,11 @@ def run_strategy(df):
 
             hit_stop = close <= stop_price
             time_exit = (i - entry_idx) >= max_hold_bars
-            # Soft trend exit: only force exit on EMA cross if trade is losing
+            # Soft trend exit: only force exit on EMA cross if trade is losing AND been open ≥5 bars
             # Profitable trades are protected by trailing stop + EMA floor
-            trend_exit = (ema_f < ema_s and close <= entry_price)
-            # RSI profit-taking: exit when very overbought and in profit
-            rsi_exit = (rsi > rsi_exit_long and close > entry_price)
+            trend_exit = (ema_f < ema_s and close <= entry_price and (i - entry_idx) >= 5)
 
-            if hit_stop or time_exit or trend_exit or rsi_exit:
+            if hit_stop or time_exit or trend_exit:
                 exit_px = stop_price if hit_stop else close
                 trades.append({
                     "entry_idx": entry_idx, "exit_idx": i,
@@ -456,12 +453,10 @@ def run_strategy(df):
 
             hit_stop = close >= stop_price
             time_exit = (i - entry_idx) >= short_max_hold_bars
-            # Soft trend exit: only force exit on EMA cross if trade is losing
-            trend_exit = (ema_f > ema_s and close >= entry_price)
-            # RSI profit-taking: exit when very oversold and in profit
-            rsi_exit = (rsi < rsi_exit_short and close < entry_price)
+            # Soft trend exit: only force exit on EMA cross if trade is losing AND been open ≥5 bars
+            trend_exit = (ema_f > ema_s and close >= entry_price and (i - entry_idx) >= 5)
 
-            if hit_stop or time_exit or trend_exit or rsi_exit:
+            if hit_stop or time_exit or trend_exit:
                 exit_px = stop_price if hit_stop else close
                 trades.append({
                     "entry_idx": entry_idx, "exit_idx": i,
