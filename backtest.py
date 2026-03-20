@@ -187,9 +187,9 @@ def run_strategy(df):
     adx_threshold = 15
     atr_sl_mult = 2.0
     atr_trail_mult = 1.6
-    risk_pct = 0.019
+    risk_pct = 0.014
     max_hold_bars = 80
-    cooldown_bars = 1
+    cooldown_bars = 0
 
     # RSI pullback thresholds (long) — widened to catch more setups
     rsi_pullback_low = 48
@@ -225,7 +225,7 @@ def run_strategy(df):
     roc_short_max = 0.0  # Price must be falling for shorts
 
     # Short-side risk is smaller (BTC has upward bias)
-    short_risk_pct = 0.010
+    short_risk_pct = 0.0072
     short_atr_sl_mult = 2.4
     short_atr_trail_mult = 1.9
     short_max_hold_bars = 40  # Allow shorts more room to develop
