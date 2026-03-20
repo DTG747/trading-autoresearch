@@ -1,68 +1,13 @@
 {
-  "best_score": 56.5878,
-  "iteration": 92,
-  "phase": 3,
-  "phase_note": "Phase 3: score formula now includes profit_factor and total_return terms. Sharpe cap raised 20->50. Fresh start from Phase 2 best strategy (EMA21/55 + RSI pullback + ADX + ATR trailing).",
+  "best_score": -7.6411,
+  "iteration": 0,
+  "phase": 4,
+  "phase_note": "Phase 4: Reality-check layer. Win rate penalty (>70% or <35%), PF capped at 4x, too-clean DD penalty (<1%), Sharpe capped at 3.0, min 20 trades. Target: score > 8.0.",
   "run_history": [
     {
-      "iteration": 1,
-      "score": 34.5692,
-      "result": "kept"
-    },
-    {
-      "iteration": 2,
-      "score": 39.7979,
-      "result": "kept"
-    },
-    {
-      "iteration": 4,
-      "score": 40.9396,
-      "result": "kept"
-    },
-    {
-      "iteration": 12,
-      "score": 49.3106,
-      "result": "kept"
-    },
-    {
-      "iteration": 13,
-      "score": 51.2242,
-      "result": "kept"
-    },
-    {
-      "iteration": 15,
-      "score": 52.1339,
-      "result": "kept"
-    },
-    {
-      "iteration": 17,
-      "score": 53.0678,
-      "result": "kept"
-    },
-    {
-      "iteration": 25,
-      "score": 55.5141,
-      "result": "kept"
-    },
-    {
-      "iteration": 40,
-      "score": 56.0968,
-      "result": "kept"
-    },
-    {
-      "iteration": 58,
-      "score": 56.5107,
-      "result": "kept"
-    },
-    {
-      "iteration": 67,
-      "score": 56.5455,
-      "result": "kept"
-    },
-    {
-      "iteration": 92,
-      "score": 56.5878,
-      "result": "kept"
+      "iteration": 0,
+      "score": -7.6411,
+      "result": "baseline (Phase 3 strategy re-scored under Phase 4 rules)"
     }
   ]
 }

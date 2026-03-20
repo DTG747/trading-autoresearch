@@ -36,20 +36,27 @@ def load_data(path="data/btc_4h.csv"):
 
 def compute_metrics(trades, df):
     """
-    Phase 3 composite score formula:
+    Phase 4 composite score formula (reality-check layer added):
+
         composite_score = sharpe - 0.5 * max_drawdown_pct
-                        + 0.5 * ln(profit_factor)
+                        + 0.5 * ln(min(profit_factor, 4.0))   ← PF capped at 4x
                         + 0.05 * min(total_return_pct, 100)
+                        - win_rate_penalty                     ← NEW: penalizes unrealistic WR
+                        - too_clean_penalty                    ← NEW: penalizes near-zero DD
 
-    This rewards strategies that:
-      - Have high risk-adjusted returns (Sharpe)
-      - Keep drawdowns low (- 0.5 * max_dd)
-      - Make more on winners than they lose on losers (profit_factor term)
-      - Actually make meaningful absolute returns (return term, capped at 100%)
+    Reality-check penalties (Phase 4):
+      - Win rate > 70%: penalty = (win_rate% - 70) * 0.5   (linear, -5pts at 80%, -15pts at 100%)
+      - Win rate < 35%: penalty = (35 - win_rate%) * 0.3   (needs some edge)
+      - Profit factor contribution capped at ln(4.0) ≈ 1.39 — rewards up to PF=4, not PF=10000
+      - Max drawdown < 1%: penalty = (1.0 - max_dd%) * 5.0 (too clean = degenerate or overfit)
 
-    Sharpe is CAPPED at 50.0 (raised from Phase 2's 20.0) to prevent
-    degenerate zero-variance solutions while allowing genuinely good strategies
-    to score higher.
+    Sharpe is CAPPED at 3.0 (realistic live ceiling for a good algo).
+    Theoretical ceiling: ~15.0 for a genuinely good real-world strategy.
+
+    Hard gates (score = -100 if violated):
+      - Minimum 20 trades on training data (raised from 10)
+      - Minimum 1% total return
+      - Profit factor >= 1.0
 
     trades: list of dicts with keys:
         entry_idx, exit_idx, entry_price, exit_price, direction ('long'/'short'), size
@@ -97,9 +104,9 @@ def compute_metrics(trades, df):
         else:
             sharpe_ratio = (mean_r / std_r) * np.sqrt(2190)
 
-    # HARD CAP: prevents gaming via near-zero variance solutions
-    # Phase 3: raised from 20.0 → 50.0 to give headroom for genuinely good strategies
-    sharpe_ratio = min(sharpe_ratio, 50.0)
+    # HARD CAP: realistic live ceiling for a good algo
+    # Phase 4: lowered from 50.0 → 3.0 (Sharpe >3 in live trading is exceptional, >10 is degenerate)
+    sharpe_ratio = min(sharpe_ratio, 3.0)
 
     # Max drawdown
     peak = equity_curve[0]
@@ -118,10 +125,34 @@ def compute_metrics(trades, df):
 
     total_return_pct = (equity - initial_capital) / initial_capital * 100.0
 
-    # Phase 3 composite score: Sharpe + profit factor + return magnitude - drawdown penalty
-    pf_term = 0.5 * np.log(max(profit_factor, 1.0))           # rewards better win/loss ratio
+    # Phase 4 composite score: reality-check layer applied
+    # PF capped at 4.0 — rewards real edge, not degenerate cherry-picking
+    pf_capped = min(profit_factor, 4.0)
+    pf_term = 0.5 * np.log(max(pf_capped, 1.0))               # max contribution: 0.5*ln(4) ≈ 0.69
     return_term = 0.05 * min(total_return_pct, 100.0)          # rewards absolute returns, capped at 100%
-    composite_score = sharpe_ratio - 0.5 * max_drawdown_pct + pf_term + return_term
+
+    # Win rate reality check: real strategies win 40-70% of the time
+    # >70% suggests overfitting or degenerate entry filtering
+    if win_rate > 70.0:
+        win_rate_penalty = (win_rate - 70.0) * 0.5             # -5 pts at 80%, -15 pts at 100%
+    elif win_rate < 35.0:
+        win_rate_penalty = (35.0 - win_rate) * 0.3             # needs some basic edge
+    else:
+        win_rate_penalty = 0.0
+
+    # "Too clean" drawdown penalty: 0% DD over 14 months = degenerate
+    # Real strategies experience drawdowns — this is healthy, not bad
+    if max_drawdown_pct < 1.0:
+        too_clean_penalty = (1.0 - max_drawdown_pct) * 5.0     # up to -5 pts for 0% DD
+    else:
+        too_clean_penalty = 0.0
+
+    composite_score = (sharpe_ratio
+                       - 0.5 * max_drawdown_pct
+                       + pf_term
+                       + return_term
+                       - win_rate_penalty
+                       - too_clean_penalty)
 
     return {
         "sharpe_ratio": round(sharpe_ratio, 4),
@@ -163,7 +194,7 @@ def run_strategy(df):
     atr_trail_mult = 0.33  # trailing stop distance (tighter to lock profits)
     atr_trail_tight = 0.56  # tighter trail once trade is well in profit
     trail_tighten_threshold = 0.85  # tighten trail after price moves 0.85x ATR in favor
-    position_size = 56200.0
+    position_size = 54700.0
     partial_tp_atr_mult = 2.2  # take partial profit at 2.2x ATR
     partial_tp_fraction = 0.25  # close 25% of position at partial TP
     partial_tp2_atr_mult = 2.6  # second partial profit at 2.6x ATR
@@ -173,7 +204,7 @@ def run_strategy(df):
     vol_period = 20         # volume moving average period
     vol_mult = 0.5          # volume must be >= 0.5x average (allow more trades)
     # RSI thresholds for pullback detection
-    rsi_pullback_low = 41
+    rsi_pullback_low = 38
     rsi_recover_low = 44
     rsi_pullback_high = 58
     rsi_recover_high = 54
@@ -320,7 +351,7 @@ def run_strategy(df):
 
             # Break-even+: once price moves in favor, lock in small profit above entry
             if best_price >= entry_price + breakeven_atr_mult * atr:
-                be_stop = entry_price + 0.05 * atr  # lock in tiny profit
+                be_stop = entry_price + 0.12 * atr  # lock in tiny profit
                 if be_stop > stop_price:
                     stop_price = be_stop
 
@@ -391,7 +422,7 @@ def run_strategy(df):
 
             # Break-even+: once price moves in favor, lock in small profit above entry
             if best_price <= entry_price - breakeven_atr_mult * atr:
-                be_stop = entry_price - 0.05 * atr  # lock in tiny profit
+                be_stop = entry_price - 0.12 * atr  # lock in tiny profit
                 if be_stop < stop_price:
                     stop_price = be_stop
 
@@ -535,9 +566,9 @@ if __name__ == "__main__":
 
     # --- Minimum requirements gate ---
     FAIL_SCORE = -100.0
-    if train_m["num_trades"] < 10:
+    if train_m["num_trades"] < 20:
         score = FAIL_SCORE
-        reason = f"too few trades ({train_m['num_trades']} < 10 required)"
+        reason = f"too few trades ({train_m['num_trades']} < 20 required)"
     elif train_m["total_return_pct"] < 1.0:
         score = FAIL_SCORE
         reason = f"return too low ({train_m['total_return_pct']:.2f}% < 1% required)"
