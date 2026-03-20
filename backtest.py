@@ -187,21 +187,21 @@ def run_strategy(df):
     rsi_period = 14
     atr_period = 14
     adx_period = 14
-    adx_threshold = 18          # lowered from 25 to catch more trends
-    atr_sl_mult = 2.5           # wider stop: 2.5x ATR (was 1.1x)
-    atr_tp_mult = 5.0           # take profit at 5x ATR
-    atr_trail_mult = 2.0        # trailing stop at 2x ATR (simple, no tightening)
-    position_size = 10000.0     # fixed size for uniform returns
-    max_hold_bars = 40          # give trends room to play out
-    cooldown_bars = 2           # short cooldown after any trade
+    adx_threshold = 15          # lower to catch more trends, especially in holdout
+    atr_sl_mult = 2.0           # tighter stop: 2.0x ATR (was 2.5x) to reduce DD
+    atr_tp_mult = 4.0           # take profit at 4x ATR (was 5x)
+    atr_trail_mult = 1.8        # trailing stop at 1.8x ATR
+    risk_per_trade = 200.0      # risk $200 per trade (2% of 10k capital)
+    max_hold_bars = 30          # slightly shorter hold (was 40)
+    cooldown_bars = 1           # shorter cooldown to allow more trades
 
-    # RSI pullback thresholds — widened to catch more setups
-    rsi_pullback_low = 45       # was 38 — RSI just needs to dip below 45
-    rsi_recover_low = 48        # was 44 — recover above 48 to enter
-    rsi_pullback_high = 55      # was 58 — RSI just needs to rise above 55
-    rsi_recover_high = 52       # was 54 — drop below 52 to enter short
+    # RSI pullback thresholds — widened further for more entries
+    rsi_pullback_low = 48       # RSI dips below 48 in uptrend
+    rsi_recover_low = 50        # recover above 50 to enter long
+    rsi_pullback_high = 52      # RSI rises above 52 in downtrend
+    rsi_recover_high = 50       # drop below 50 to enter short
 
-    max_pullback_age = 12       # pullback signal valid for 12 bars
+    max_pullback_age = 15       # pullback signal valid for 15 bars
 
     # --- Indicators ---
     df = df.copy()
@@ -249,6 +249,7 @@ def run_strategy(df):
     stop_price = None
     tp_price = None
     best_price = None
+    position_size = 0.0
     warmup = slow_ema + 20
 
     # RSI pullback tracking
@@ -355,15 +356,20 @@ def run_strategy(df):
 
             # Extension filter: skip if price too far from slow EMA
             ema_dist_pct = abs(close - ema_s) / ema_s * 100.0 if ema_s > 0 else 0
-            not_overextended = ema_dist_pct < 12.0
+            not_overextended = ema_dist_pct < 15.0
 
             if (uptrend and strong_trend and long_pullback_ready
                     and rsi > rsi_recover_low and rsi < 70
                     and not_overextended):
+                # ATR-based position sizing: risk fixed $ per trade
+                stop_dist = atr_sl_mult * atr
+                position_size = risk_per_trade / (stop_dist / close) if stop_dist > 0 else 0
+                if position_size <= 0:
+                    continue
                 position = "long"
                 entry_price = close
                 entry_idx = i
-                stop_price = close - atr_sl_mult * atr
+                stop_price = close - stop_dist
                 tp_price = close + atr_tp_mult * atr
                 best_price = close
                 long_pullback_ready = False
@@ -371,10 +377,15 @@ def run_strategy(df):
             elif (downtrend and strong_trend and short_pullback_ready
                       and rsi < rsi_recover_high and rsi > 30
                       and not_overextended):
+                # ATR-based position sizing: risk fixed $ per trade
+                stop_dist = atr_sl_mult * atr
+                position_size = risk_per_trade / (stop_dist / close) if stop_dist > 0 else 0
+                if position_size <= 0:
+                    continue
                 position = "short"
                 entry_price = close
                 entry_idx = i
-                stop_price = close + atr_sl_mult * atr
+                stop_price = close + stop_dist
                 tp_price = close - atr_tp_mult * atr
                 best_price = close
                 short_pullback_ready = False
